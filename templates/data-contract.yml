@@ -1,0 +1,788 @@
+# =============================================================================
+# Data Contract — [Logical Dataset Name e.g., "Wagon Cycle Fact (Mart Gold)"]
+# Template: v1.0  —  Analytics Engineering Team
+# =============================================================================
+# Usage: Copy to /contracts/{zone}/{domain}/{dataset-name}.contract.yml
+#   E.g.: /contracts/gold/logistics/fact-wagon-cycle.contract.yml
+# This file is machine-readable. Do not remove or rename top-level keys.
+# Validation: Run `data-contract-cli validate --file <path>` before commit.
+# =============================================================================
+
+apiVersion: datacontract/v1
+kind: DataContract
+metadata:
+  # Unique identifier (UUID v4 recommended, or org-scoped name)
+  id: "00000000-0000-0000-0000-000000000000"
+  # URL-friendly machine name. Lowercase, hyphens, no spaces.
+  name: "fact-wagon-cycle-gold"
+  # Human-readable title (10 words or fewer)
+  title: "Fact: Wagon Cycle (Port-to-Port Completed Cycles)"
+  # Short description — shows up in catalog search results (1-2 sentences)
+  description: >
+    One row per completed port-to-port wagon cycle. A cycle begins when a
+    loaded wagon departs Port Owendo and ends when the same wagon returns
+    empty to Port Owendo. Enriches TMS movement events with IoT gate
+    timestamps, weather covariates, and locomotive/wagon attributes.
+    Primary fact table for Wagon Turnaround Time (KPI-01) and OTIF (KPI-04)
+    analysis.
+  # Who owns this data product day-to-day
+  owner:
+    team: "Logistics Analytics"
+    individual: "ana.silva@setrag.ga"           # Primary contact email
+    escalation: "supply-chain-dir@setrag.ga"    # Escalation contact
+    slack_channel: "#logistics-analytics-alerts"
+  # Domain classification (taxonomy from your data catalog)
+  domain: "logistics"
+  subdomain: "rail-operations"
+  tags:
+    - "fact-table"
+    - "wagon"
+    - "turnaround-time"
+    - "gold-zone"
+    - "kpi-source"
+    - "powerbi-dataset"
+    - "critical:yes"   # 'critical:yes' triggers stricter SLOs (see §spec.slos)
+  # Versions are semantic: MAJOR (breaking) . MINOR (new col) . PATCH (bugfix)
+  version: "1.0.0"
+  # Date this contract version was ratified
+  createdAt: "2025-07-01"
+  updatedAt: "2025-07-01"
+  # License / usage classification
+  classification: "INTERNAL_USE"   # INTERNAL_USE | CONFIDENTIAL | RESTRICTED | PUBLIC
+  # Links to related artifacts
+  links:
+    catalog_entry: "https://purview.setrag.ga/asset/.../fact-wagon-cycle"
+    source_business_question: "/docs/business-question.md#BQ-2025-047"
+    runbook_data_quality: "/docs/runbooks/dq-fact-wagon-cycle.md"
+    dbt_model: "/models/marts/logistics/fact_wagon_cycle.sql"
+
+# =============================================================================
+# SPEC — Schema, Quality Rules, SLOs, Semantics, Consumers
+# =============================================================================
+spec:
+  # ---------------------------------------------------------------------------
+  # SCHEMA — Column-level contract
+  #   Columns marked required: true must be present in every row (NOT NULL).
+  #   primaryKey: true marks the unique identifier for a row (grain).
+  # ---------------------------------------------------------------------------
+  schema:
+    # Table-level metadata
+    table:
+      database: "prodeus_synapse"          # Remove if using Lakehouse without DB
+      schema: "gold_logistics"
+      table: "fact_wagon_cycle"
+      format: "delta"                      # delta | parquet | csv | iceberg | table
+      location: "abfss://gold@adlssetramprod.dfs.core.windows.net/logistics/fact_wagon_cycle/"
+      partitionBy:
+        - cycle_start_date_utc             # Date partitioning column(s)
+      # Grain description in natural language + FK references
+      grain: "One row per completed wagon port-to-port cycle. Uniquely identified by wagon_code + cycle_sequence within wagon_code."
+      primaryKey:
+        - wagon_cycle_id                   # Surrogate key (single-column PK preferred)
+      foreignKeys:
+        - column: dim_wagon_key
+          references: "gold_rail.dim_wagon.wagon_key"
+        - column: dim_locomotive_key
+          references: "gold_rail.dim_locomotive.locomotive_key"
+        - column: dim_cycle_start_date_key
+          references: "gold_common.dim_date.date_key"
+        - column: origin_corridor_id
+          references: "gold_logistics.dim_corridor.corridor_id"
+
+    # --- Column definitions --------------------------------------------------
+    columns:
+      # ----------------------------
+      # Keys & Identifiers
+      # ----------------------------
+      - name: wagon_cycle_id
+        type: "BIGINT"
+        required: true
+        primaryKey: true
+        description: "Surrogate key (hash-based): md5(wagon_code + '-' + cycle_start_ts_utc). Unique per cycle row."
+        businessName: "Wagon Cycle ID"
+        pattern: "^[0-9]+$"
+
+      - name: wagon_code
+        type: "VARCHAR(20)"
+        required: true
+        description: "Business identifier for the rail wagon (printed on wagon side). E.g., 'SETR-W-12345'."
+        businessName: "Wagon Code"
+        pattern: "^SETR-W-[0-9]{5}$"
+        references: "gold_rail.dim_wagon.wagon_code"
+
+      - name: cycle_sequence
+        type: "INTEGER"
+        required: true
+        description: "1-based ordinal cycle number for this wagon within the analysis history window. First ever cycle = 1."
+        businessName: "Cycle Sequence Number"
+        minimum: 1
+
+      - name: dim_wagon_key
+        type: "BIGINT"
+        required: true
+        description: "FK to dim_wagon (SCD-2). Matches at cycle_start_ts_utc effective timestamp."
+        businessName: "Wagon Dimension Key"
+
+      - name: dim_locomotive_key
+        type: "BIGINT"
+        required: false
+        description: "FK to dim_locomotive. NULL if no locomotive could be linked for this cycle (unusual; see DQ rule Q-REF01)."
+        businessName: "Locomotive Dimension Key"
+
+      - name: dim_cycle_start_date_key
+        type: "INTEGER"
+        required: true
+        description: "FK to dim_date for cycle start date (UTC). Format YYYYMMDD as INT."
+        businessName: "Cycle Start Date Key"
+        minimum: 20240101
+        maximum: 20301231
+
+      - name: cycle_start_date_utc
+        type: "DATE"
+        required: true
+        description: "Calendar date portion of cycle_start_ts_utc. Used for partitioning and date-range scans."
+        businessName: "Cycle Start Date (UTC)"
+
+      - name: origin_corridor_id
+        type: "VARCHAR(10)"
+        required: true
+        description: "FK to dim_corridor. Origin route corridor for this cycle (port → mine)."
+        businessName: "Origin Corridor ID"
+        allowedValues: ["COR-FV-O", "COR-FV-M", "COR-FV-LT", "COR-FV-MN", "COR-OTHER"]
+
+      - name: return_corridor_id
+        type: "VARCHAR(10)"
+        required: true
+        description: "FK to dim_corridor. Return route corridor for this cycle (mine → port)."
+        businessName: "Return Corridor ID"
+        allowedValues: ["COR-FV-O", "COR-FV-M", "COR-FV-LT", "COR-FV-MN", "COR-OTHER"]
+
+      # ----------------------------
+      # Timestamps (all stored as UTC)
+      # ----------------------------
+      - name: cycle_start_ts_utc
+        type: "TIMESTAMP"
+        required: true
+        description: "Timestamp when the wagon departs Port Owendo (loaded) — beginning of the cycle. Source: SRC-03 gate G-01 departure event, fallback SRC-04 GPS geofence exit."
+        businessName: "Cycle Start (Port Departure — UTC)"
+
+      - name: mine_arrival_ts_utc
+        type: "TIMESTAMP"
+        required: false
+        description: "Timestamp when wagon arrives at loading mine gate. NULL if mine gate event missing (handled in DQ rules)."
+        businessName: "Mine Arrival (UTC)"
+
+      - name: load_start_ts_utc
+        type: "TIMESTAMP"
+        required: false
+        description: "Timestamp when loading operation begins (Port Ops / mine system)."
+        businessName: "Loading Start (UTC)"
+
+      - name: load_end_ts_utc
+        type: "TIMESTAMP"
+        required: false
+        description: "Timestamp when loading operation ends (wagon fully loaded)."
+        businessName: "Loading End (UTC)"
+
+      - name: mine_departure_ts_utc
+        type: "TIMESTAMP"
+        required: false
+        description: "Timestamp when loaded wagon departs mine for return to port."
+        businessName: "Mine Departure (UTC)"
+
+      - name: port_arrival_ts_utc
+        type: "TIMESTAMP"
+        required: true
+        description: "Timestamp when wagon arrives back at Port Owendo (loaded on return leg)."
+        businessName: "Port Arrival (Return Leg — UTC)"
+
+      - name: unload_start_ts_utc
+        type: "TIMESTAMP"
+        required: false
+        description: "Timestamp when port unloading begins."
+        businessName: "Unloading Start (UTC)"
+
+      - name: unload_end_ts_utc
+        type: "TIMESTAMP"
+        required: false
+        description: "Timestamp when port unloading ends (wagon empty)."
+        businessName: "Unloading End (UTC)"
+
+      - name: cycle_end_ts_utc
+        type: "TIMESTAMP"
+        required: true
+        description: "Timestamp when the empty wagon is released back into the outbound yard (or next cycle departure). End of the cycle. Must be >= cycle_start_ts_utc."
+        businessName: "Cycle End (Empty Return — UTC)"
+
+      # ----------------------------
+      # Durations (hours — decimal)
+      # ----------------------------
+      - name: total_cycle_duration_hr
+        type: "DECIMAL(10,2)"
+        required: true
+        description: "Total elapsed time from cycle_start_ts_utc to cycle_end_ts_utc in hours. = EXTRACT(EPOCH FROM (cycle_end_ts_utc - cycle_start_ts_utc)) / 3600.0."
+        businessName: "Total Cycle Duration (hours)"
+        minimum: 0.0
+        maximum: 720.0   # 30 days cap; outliers flag in DQ
+
+      - name: port_dwell_pre_unload_hr
+        type: "DECIMAL(10,2)"
+        required: true
+        description: "Time waiting at port before unload begins. = EXTRACT(EPOCH FROM (unload_start_ts_utc - port_arrival_ts_utc)) / 3600.0. If unload_start missing, uses port-level imputation from 30-day median."
+        businessName: "Port Dwell Before Unload (hours)"
+        minimum: 0.0
+
+      - name: travel_loaded_to_port_hr
+        type: "DECIMAL(10,2)"
+        required: true
+        description: "Travel time mine→port (loaded). = EXTRACT(EPOCH FROM (port_arrival_ts_utc - mine_departure_ts_utc)) / 3600.0."
+        businessName: "Travel Time — Mine to Port Loaded (hours)"
+        minimum: 0.0
+
+      - name: mine_loading_dwell_hr
+        type: "DECIMAL(10,2)"
+        required: true
+        description: "Dwell at mine for loading. = EXTRACT(EPOCH FROM (mine_departure_ts_utc - mine_arrival_ts_utc)) / 3600.0."
+        businessName: "Mine Loading Dwell (hours)"
+        minimum: 0.0
+
+      - name: intermediate_station_dwell_hr
+        type: "DECIMAL(10,2)"
+        required: true
+        description: "Total dwell at intermediate stations (summing all stop durations from leg-level detail, rolled up)."
+        businessName: "Intermediate Station Total Dwell (hours)"
+        minimum: 0.0
+
+      - name: travel_empty_port_to_mine_hr
+        type: "DECIMAL(10,2)"
+        required: true
+        description: "Travel time port→mine (empty). = EXTRACT(EPOCH FROM (mine_arrival_ts_utc - cycle_start_ts_utc)) / 3600.0."
+        businessName: "Travel Time — Port to Mine Empty (hours)"
+        minimum: 0.0
+
+      # ----------------------------
+      # Cargo & Financial
+      # ----------------------------
+      - name: product_code
+        type: "VARCHAR(10)"
+        required: true
+        description: "Cargo product code from ERP SRC-01. MN-LUMP = manganese lump; MN-SINT = manganese sinter."
+        businessName: "Product Code"
+        allowedValues: ["MN-LUMP", "MN-SINT", "OTHER-ORE", "EMPTY"]
+
+      - name: net_tonne
+        type: "DECIMAL(12,3)"
+        required: true
+        description: "Net cargo weight in tonnes (gross minus wagon tare). 0.000 for empty return."
+        businessName: "Net Tonne"
+        minimum: 0.0
+        maximum: 120.0   # Physical wagon capacity limit
+
+      - name: gross_tonne
+        type: "DECIMAL(12,3)"
+        required: false
+        description: "Gross weight (wagon tare + cargo) in tonnes, if scale reading available."
+        businessName: "Gross Tonne"
+        minimum: 20.0    # Wagon tare minimum
+        maximum: 160.0
+
+      - name: erp_order_id
+        type: "VARCHAR(30)"
+        required: false
+        description: "ERP (Sage X3) commande number (CDC header). Linked for OTIF KPI-04. NULL if cycle is empty/no order."
+        businessName: "ERP Order ID"
+
+      - name: shipment_id
+        type: "VARCHAR(40)"
+        required: false
+        description: "TMS shipment reference ID. NULL if cycle cannot be linked to a shipment."
+        businessName: "TMS Shipment ID"
+
+      - name: otif_flag
+        type: "BOOLEAN"
+        required: true
+        description: "TRUE if cycle shipment qualifies as On-Time In-Full. Per KPI-04 formula: delivery_date <= contract_due_date AND ABS(delivered - ordered) / ordered <= 0.02. FALSE otherwise. FALSE also if order link missing (conservative)."
+        businessName: "OTIF Flag (On-Time In-Full)"
+
+      - name: logistics_cost_eur
+        type: "DECIMAL(14,4)"
+        required: false
+        description: "Approximated allocated logistics cost per cycle from SRC-08. Use at corridor/fleet level ONLY. Not valid for individual wagon decision-making."
+        businessName: "Allocated Logistics Cost (EUR)"
+        minimum: 0.0
+
+      # ----------------------------
+      # Weather Covariate
+      # ----------------------------
+      - name: rainfall_total_mm_cycle
+        type: "DECIMAL(8,2)"
+        required: true
+        description: "Sum of hourly rainfall (mm) across all intermediate weather stations during cycle window."
+        businessName: "Total Rainfall During Cycle (mm)"
+        minimum: 0.0
+
+      - name: weather_severity_bucket
+        type: "VARCHAR(10)"
+        required: true
+        description: "Discretized rainfall severity: NONE (0 mm), LIGHT (0.1–20 mm), HEAVY (>20 mm)."
+        businessName: "Weather Severity Bucket"
+        allowedValues: ["NONE", "LIGHT", "HEAVY"]
+
+      # ----------------------------
+      # Data Quality / Meta columns
+      # ----------------------------
+      - name: dq_completeness_score
+        type: "DECIMAL(5,4)"
+        required: true
+        description: "Per-row completeness score: (non-null event timestamp columns present) / (total event timestamp cols 8). 1.0 = all events present. Range [0, 1]."
+        businessName: "Row Completeness Score"
+        minimum: 0.0
+        maximum: 1.0
+
+      - name: has_g07_fallback
+        type: "BOOLEAN"
+        required: true
+        description: "TRUE if ANY event timestamp in this cycle was imputed via G-07 GPS-geofence fallback (per DI-001). Used for sensitivity analysis filtering."
+        businessName: "Used G-07 GPS Fallback"
+
+      - name: __dbt_loaded_at_utc
+        type: "TIMESTAMP"
+        required: true
+        description: "Timestamp when dbt model ran that wrote this row. Internal ETL metadata column."
+        businessName: "ETL Loaded At (UTC)"
+
+      - name: __dbt_batch_run_id
+        type: "VARCHAR(36)"
+        required: true
+        description: "UUID of the dbt run that produced this row; enables lineage trace to specific pipeline run."
+        businessName: "ETL Batch Run ID"
+
+  # ---------------------------------------------------------------------------
+  # QUALITY RULES
+  #   Each rule has: unique id, type, parameters, severity, checks{} definition.
+  #   Severity levels: error (breaks contract) | warn (tolerated temporarily) | info.
+  # ---------------------------------------------------------------------------
+  quality:
+    # Freshness / timeliness rules
+    freshness:
+      - id: Q-FRESH-01
+        description: "New rows must appear in the table within 90 minutes of cycle completion for 99% of cycles."
+        type: "freshness"
+        params:
+          timestampColumn: "cycle_end_ts_utc"
+          loadedAtColumn: "__dbt_loaded_at_utc"
+          toleranceMinutes: 90
+          percentagePass: 99
+        severity: "error"
+        checks:
+          source_query: "SELECT COUNT(*) failed_rows FROM fact_wagon_cycle WHERE DATE_DIFF('minute', cycle_end_ts_utc, __dbt_loaded_at_utc) > 90 AND cycle_end_ts_utc >= CURRENT_DATE - INTERVAL 7 DAYS"
+          expected_result_type: "count"
+          max_allowed_failed: 100   # Absolute cap
+          sla_metric: "freshness_pct"
+
+      - id: Q-FRESH-02
+        description: "Full daily partition for date D must be materialized in the table by 07:30 UTC+1 (Libreville local) on day D+1."
+        type: "partition_availability"
+        params:
+          partitionColumn: "cycle_start_date_utc"
+          partitionGranularity: "day"
+          readyByTime: "06:30:00"   # UTC (equals 07:30 WAT)
+          lookbackDays: 30
+          expectedMinRowsPerPartition: 2000
+        severity: "error"
+        checks:
+          manual_acknowledgement_required: true
+
+    # Schema & structural rules
+    schema:
+      - id: Q-SCH-01
+        description: "Primary key wagon_cycle_id must be 100% unique across the table."
+        type: "uniqueness"
+        params:
+          columns: ["wagon_cycle_id"]
+        severity: "error"
+        checks:
+          duplicate_count_max: 0
+          sql: "SELECT COUNT(*) FROM (SELECT wagon_cycle_id FROM fact_wagon_cycle GROUP BY 1 HAVING COUNT(*) > 1) t"
+
+      - id: Q-SCH-02
+        description: "Required columns must be 100% NOT NULL across all rows."
+        type: "not_null"
+        params:
+          columns:
+            - wagon_cycle_id
+            - wagon_code
+            - cycle_sequence
+            - dim_wagon_key
+            - dim_cycle_start_date_key
+            - cycle_start_date_utc
+            - origin_corridor_id
+            - return_corridor_id
+            - cycle_start_ts_utc
+            - port_arrival_ts_utc
+            - cycle_end_ts_utc
+            - total_cycle_duration_hr
+            - port_dwell_pre_unload_hr
+            - travel_loaded_to_port_hr
+            - mine_loading_dwell_hr
+            - intermediate_station_dwell_hr
+            - travel_empty_port_to_mine_hr
+            - product_code
+            - net_tonne
+            - otif_flag
+            - rainfall_total_mm_cycle
+            - weather_severity_bucket
+            - dq_completeness_score
+            - has_g07_fallback
+            - __dbt_loaded_at_utc
+            - __dbt_batch_run_id
+        severity: "error"
+        checks:
+          null_pct_per_column_max: 0.0
+
+    # Referential integrity (FK) rules
+    referential:
+      - id: Q-REF-01
+        description: "Every non-null dim_locomotive_key must exist in dim_locomotive dimension."
+        type: "foreign_key"
+        params:
+          childColumn: "dim_locomotive_key"
+          parentTable: "gold_rail.dim_locomotive"
+          parentColumn: "locomotive_key"
+          ignoreNullChild: true
+        severity: "error"
+        checks:
+          orphan_count_max: 0
+
+      - id: Q-REF-02
+        description: "dim_wagon_key referential integrity to dim_wagon."
+        type: "foreign_key"
+        params:
+          childColumn: "dim_wagon_key"
+          parentTable: "gold_rail.dim_wagon"
+          parentColumn: "wagon_key"
+        severity: "error"
+        checks:
+          orphan_count_max: 0
+
+    # Distribution & business-rule checks
+    distribution:
+      - id: Q-DIST-01
+        description: "Row-level duration sanity: total_cycle_duration_hr must equal sum of leg-duration components within ± 5 minutes (0.083 hr)."
+        type: "expression_match"
+        params:
+          leftExpression: "total_cycle_duration_hr"
+          rightExpression: "(travel_empty_port_to_mine_hr + mine_loading_dwell_hr + travel_loaded_to_port_hr + port_dwell_pre_unload_hr + intermediate_station_dwell_hr)"
+          toleranceAbsolute: 0.083
+        severity: "warn"
+        checks:
+          failed_pct_max: 1.0    # Tolerate up to 1% rows failing this (rounding / imputation edge cases)
+
+      - id: Q-DIST-02
+        description: "Cycle duration outliers: no more than 0.5% of cycles should exceed 30 days (720 hr) per business definition of a valid cycle."
+        type: "threshold_range"
+        params:
+          column: "total_cycle_duration_hr"
+          minValue: 0.0
+          maxValue: 720.0
+        severity: "warn"
+        checks:
+          outlier_pct_max: 0.5
+
+      - id: Q-DIST-03
+        description: "Net tonne by product: MN-LUMP average per cycle should be 65–85 tonnes; MN-SINT 75–95 tonnes (± 5% from 12-month mean)."
+        type: "grouped_statistical_range"
+        params:
+          valueColumn: "net_tonne"
+          groupByColumn: "product_code"
+          filterClause: "product_code IN ('MN-LUMP','MN-SINT') AND net_tonne > 0"
+          expectedRanges:
+            MN-LUMP: { minMean: 58.5, maxMean: 93.5, minRowsPerGroup: 10000 }
+            MN-SINT: { minMean: 71.25, maxMean: 99.75, minRowsPerGroup: 5000 }
+        severity: "warn"
+        checks:
+          notify_data_steward_on_fail: true
+
+      - id: Q-DIST-04
+        description: "Ordering sanity: all event timestamps for a row must be in chronological order (no time travel)."
+        type: "custom_sql"
+        params:
+          sql: |
+            SELECT COUNT(*) bad_order_rows
+            FROM fact_wagon_cycle
+            WHERE
+              cycle_start_ts_utc > COALESCE(mine_arrival_ts_utc, cycle_end_ts_utc)
+              OR COALESCE(mine_arrival_ts_utc, cycle_start_ts_utc) > COALESCE(load_start_ts_utc, cycle_end_ts_utc)
+              OR COALESCE(load_start_ts_utc, cycle_start_ts_utc) > COALESCE(load_end_ts_utc, cycle_end_ts_utc)
+              OR COALESCE(load_end_ts_utc, cycle_start_ts_utc) > COALESCE(mine_departure_ts_utc, cycle_end_ts_utc)
+              OR COALESCE(mine_departure_ts_utc, cycle_start_ts_utc) > port_arrival_ts_utc
+              OR port_arrival_ts_utc > COALESCE(unload_start_ts_utc, cycle_end_ts_utc)
+              OR COALESCE(unload_start_ts_utc, cycle_start_ts_utc) > COALESCE(unload_end_ts_utc, cycle_end_ts_utc)
+              OR COALESCE(unload_end_ts_utc, cycle_start_ts_utc) > cycle_end_ts_utc
+              AND cycle_start_date_utc >= CURRENT_DATE - INTERVAL 30 DAYS
+        severity: "error"
+        checks:
+          failed_rows_max: 50   # Absolute; flag above this
+
+    # Uniqueness / custom checks
+    custom:
+      - id: Q-CUST-01
+        description: "Per-wagon cycle_sequence must be monotonically increasing (no gaps within wagon). A gap means a cycle was dropped."
+        type: "custom_sql"
+        params:
+          sql: |
+            SELECT COUNT(DISTINCT wagon_code) affected_wagons
+            FROM (
+              SELECT
+                wagon_code,
+                cycle_sequence,
+                ROW_NUMBER() OVER (PARTITION BY wagon_code ORDER BY cycle_start_ts_utc) rn
+              FROM fact_wagon_cycle
+              WHERE cycle_start_date_utc >= CURRENT_DATE - INTERVAL 90 DAYS
+            ) t
+            WHERE cycle_sequence != rn
+        severity: "error"
+        checks:
+          affected_entity_pct_max: 0.2   # No more than 0.2% of wagons may have a gap
+
+  # ---------------------------------------------------------------------------
+  # SERVICE LEVEL OBJECTIVES (SLOs)
+  #   Aggregated targets for the quality rules above.
+  # ---------------------------------------------------------------------------
+  serviceLevelObjectives:
+    - id: SLO-01
+      name: "Overall table contract compliance score"
+      description: "Weighted percentage of passing quality checks; publish to data catalog weekly."
+      target: 98.5
+      unit: "percent"
+      window: "7d rolling"
+      breachAction: "notify-owner + open-incident"
+      warningThreshold: 99.0
+    - id: SLO-02
+      name: "Critical rule pass rate (all severity=error rules)"
+      description: "All error-level rules pass rate per 24hr window."
+      target: 99.9
+      unit: "percent"
+      window: "24h"
+      breachAction: "page-oncall-dataeng + block-downstream-ci"
+      warningThreshold: 99.95
+    - id: SLO-03
+      name: "Partition on-time delivery"
+      description: "% of scheduled daily partitions delivered before readyByTime per Q-FRESH-02."
+      target: 99
+      unit: "percent"
+      window: "30d rolling"
+      breachAction: "notify-owner"
+      warningThreshold: 99.5
+
+  # ---------------------------------------------------------------------------
+  # SEMANTICS / EXPECTATIONS
+  #   How consumers are expected to (and not to) use this dataset.
+  # ---------------------------------------------------------------------------
+  semantics:
+    usageGuidance:
+      do:
+        - "Use as primary source for Wagon Turnaround Time (KPI-01) dashboards and analysis."
+        - "Aggregate to corridor, fleet, or date level for trend and variance analysis."
+        - "Filter on has_g07_fallback = FALSE for sensitivity analyses comparing IoT-gate-only results."
+        - "Join to dim_wagon / dim_locomotive / dim_date for attribute enrichment."
+        - "Use dq_completeness_score as a weighting variable in statistical models when > 5% of rows are partial."
+      doNot:
+        - "DO NOT use logistics_cost_eur at individual wagon-cycle level for cost allocation or performance management. SRC-08 allocations are approximations valid at corridor/month level only."
+        - "DO NOT use current-month numbers as final before T+3 business days (Port Ops manual corrections per DI-005)."
+        - "DO NOT join erp_order_id at the cycle level to individual invoice line items without first consulting Finance — multiple cycles map to one order line."
+        - "DO NOT treat this table as a legal source of truth for demurrage invoicing; use the signed demurrage log from Port Ops for that purpose."
+    commonAggregations:
+      - name: "Fleet-average WTT per month"
+        formula: "AVG(total_cycle_duration_hr)/24 GROUP BY date_trunc('month', cycle_start_ts_utc)"
+        caution: ""
+      - name: "Port dwell p90 per corridor"
+        formula: "PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY port_dwell_pre_unload_hr) GROUP BY origin_corridor_id"
+        caution: "Use large sample size per group; p90 is unreliable for < 100 rows."
+      - name: "OTIF % per product, monthly"
+        formula: "COUNT_IF(otif_flag)/COUNT(*) * 100 WHERE product_code IN ('MN-LUMP','MN-SINT') GROUP BY product_code, month"
+        caution: "Exclude product_code = 'EMPTY' rows, which always have otif_flag = FALSE by definition."
+    updateCadence: "near_real_time_15min + nightly_full_refresh_window_0100_0400_UTC"
+
+  # ---------------------------------------------------------------------------
+  # CONSUMERS — Who uses this dataset, and for what purpose?
+  # ---------------------------------------------------------------------------
+  consumers:
+    - name: "Power BI — WTT Operational Dashboard"
+      kind: "dashboard"
+      contact: "bi-team@setrag.ga"
+      accessScope: "read"
+      refreshFrequency: "Import 4x/day + DirectQuery hot path for last 24h"
+      criticalDependency: true
+      slaBreachImpact: "Shift supervisors lose visibility into live WTT; interventions delayed. Estimated €10k/day demurrage risk during outage > 4hr."
+
+    - name: "Power BI — Monthly Management Scorecard"
+      kind: "report"
+      contact: "bi-team@setrag.ga"
+      accessScope: "read"
+      refreshFrequency: "Daily import at 08:00 local"
+      criticalDependency: true
+      slaBreachImpact: "Monthly exec scorecard delayed; not time-critical below 2 business days."
+
+    - name: "Databricks — Predictive ETA Model (Phase 2)"
+      kind: "ml-feature-source"
+      contact: "data-science@setrag.ga"
+      accessScope: "read + CDF stream (future)"
+      refreshFrequency: "Daily training batch"
+      criticalDependency: false    # Phase 2, not yet in prod
+      slaBreachImpact: "Model retraining delayed; acceptable up to 72 hr."
+
+    - name: "Finance — Monthly Demurrage Analysis"
+      kind: "analysis"
+      contact: "controlling-logistics@setrag.ga"
+      accessScope: "read (corridor/month aggregate views only)"
+      refreshFrequency: "Monthly close (T+5)"
+      criticalDependency: false
+      slaBreachImpact: "Reconciliation effort increases by ~4 hr; no financial impact if corrected before T+10."
+
+    - name: "External Partner — Offtake Customer Quarterly SLA Report"
+      kind: "external-extract"
+      contact: "commercial-offtake@setrag.ga"
+      accessScope: "read via curated extract view (PII removed, aggregated)"
+      refreshFrequency: "Quarterly"
+      criticalDependency: true
+      slaBreachImpact: "Customer invoice dispute risk; must be delivered within contract window (15 days post-quarter)."
+      additionalRestrictions:
+        - "Individual wagon-level data is NEVER shared with external partners."
+        - "Extract must be reviewed and signed by Commercial Manager before dispatch."
+
+  # ---------------------------------------------------------------------------
+  # OWNERSHIP (detailed)
+  # ---------------------------------------------------------------------------
+  owner:
+    accountable:
+      role: "Logistics Analytics Engineering Lead"
+      name: "Ana Silva"
+      email: "ana.silva@setrag.ga"
+    responsibleForETL:
+      team: "Data Engineering"
+      oncall_rotation: "https://devops.setrag.ga/oncall/dataeng"
+    responsibleForDataContent:
+      team: "Rail Operations Management"
+      name: "Mme. Ndong (Rail Ops Manager)"
+      email: "rail-ops@setrag.ga"
+    dataStewards:
+      - domain: "TMS movement events (SRC-02)"
+        contact: "tms-data-steward@setrag.ga"
+      - domain: "IoT gate events (SRC-03)"
+        contact: "infrastructure-iot@setrag.ga"
+      - domain: "ERP orders / invoices (SRC-01)"
+        contact: "erp-finance-data@setrag.ga"
+
+  # ---------------------------------------------------------------------------
+  # EXAMPLES — Sample rows & queries to help new consumers get started.
+  # ---------------------------------------------------------------------------
+  examples:
+    sampleRows:
+      - description: "Typical fast cycle (Franceville-Moanda → Port Owendo, MN-LUMP, no delays, WTT = 3.2 days)"
+        row:
+          wagon_cycle_id: "8273645521012345"
+          wagon_code: "SETR-W-12345"
+          cycle_sequence: 412
+          origin_corridor_id: "COR-FV-M"
+          return_corridor_id: "COR-FV-O"
+          cycle_start_ts_utc: "2025-06-10T02:15:00Z"
+          cycle_end_ts_utc: "2025-06-13T09:05:00Z"
+          total_cycle_duration_hr: 78.83
+          port_dwell_pre_unload_hr: 6.25
+          product_code: "MN-LUMP"
+          net_tonne: 72.540
+          otif_flag: true
+          weather_severity_bucket: "NONE"
+          dq_completeness_score: 1.0
+          has_g07_fallback: false
+
+      - description: "Delayed cycle (heavy rain, G-07 fallback, port saturated — WTT = 11.7 days)"
+        row:
+          wagon_cycle_id: "8273646619876543"
+          wagon_code: "SETR-W-98765"
+          cycle_sequence: 308
+          origin_corridor_id: "COR-FV-M"
+          return_corridor_id: "COR-FV-O"
+          cycle_start_ts_utc: "2025-06-01T05:40:00Z"
+          cycle_end_ts_utc: "2025-06-12T22:30:00Z"
+          total_cycle_duration_hr: 280.83
+          port_dwell_pre_unload_hr: 52.17
+          product_code: "MN-SINT"
+          net_tonne: 86.120
+          otif_flag: false
+          weather_severity_bucket: "HEAVY"
+          dq_completeness_score: 0.875
+          has_g07_fallback: true
+
+    sampleQueries:
+      - title: "Fleet-average WTT (days) by month"
+        sql: |
+          SELECT
+            DATE_TRUNC('month', cycle_start_ts_utc) :: DATE AS month_start,
+            COUNT(*)                                 AS cycle_count,
+            AVG(total_cycle_duration_hr) / 24.0      AS avg_wtt_days,
+            PERCENTILE_CONT(0.5)
+              WITHIN GROUP (ORDER BY total_cycle_duration_hr) / 24.0 AS median_wtt_days,
+            PERCENTILE_CONT(0.9)
+              WITHIN GROUP (ORDER BY total_cycle_duration_hr) / 24.0 AS p90_wtt_days
+          FROM gold_logistics.fact_wagon_cycle
+          WHERE product_code IN ('MN-LUMP','MN-SINT')
+            AND cycle_start_date_utc >= DATE '2024-01-01'
+          GROUP BY 1
+          ORDER BY 1 DESC;
+        expectedOutcome: "1 row per month; avg_wtt_days central metric for KPI-01 dashboard."
+
+      - title: "Port dwell by corridor (last 30 days) — which corridor waits longest at port?"
+        sql: |
+          SELECT
+            origin_corridor_id,
+            COUNT(*)                                             AS n,
+            AVG(port_dwell_pre_unload_hr)                        AS mean_hr,
+            PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY port_dwell_pre_unload_hr) AS p90_hr
+          FROM gold_logistics.fact_wagon_cycle
+          WHERE cycle_start_date_utc >= CURRENT_DATE - INTERVAL 30 DAYS
+            AND product_code IN ('MN-LUMP','MN-SINT')
+          GROUP BY 1
+          HAVING n >= 100
+          ORDER BY mean_hr DESC;
+        expectedOutcome: "Rows per corridor; identify the corridor with worst port bottleneck."
+
+      - title: "OTIF % by product, rolling 28 days"
+        sql: |
+          WITH daily AS (
+            SELECT
+              cycle_start_date_utc,
+              product_code,
+              COUNT(*)                                            AS shipments,
+              COUNT_IF(otif_flag)                                 AS on_time_in_full
+            FROM gold_logistics.fact_wagon_cycle
+            WHERE product_code IN ('MN-LUMP','MN-SINT')
+              AND cycle_start_date_utc >= CURRENT_DATE - INTERVAL 56 DAYS
+            GROUP BY 1, 2
+          )
+          SELECT
+            cycle_start_date_utc AS report_date,
+            product_code,
+            SUM(shipments) OVER (
+              PARTITION BY product_code
+              ORDER BY cycle_start_date_utc
+              ROWS BETWEEN 27 PRECEDING AND CURRENT ROW
+            ) AS rolling28_shipments,
+            ROUND(100.0 * SUM(on_time_in_full) OVER (
+              PARTITION BY product_code
+              ORDER BY cycle_start_date_utc
+              ROWS BETWEEN 27 PRECEDING AND CURRENT ROW
+            ) / NULLIF(SUM(shipments) OVER (
+              PARTITION BY product_code
+              ORDER BY cycle_start_date_utc
+              ROWS BETWEEN 27 PRECEDING AND CURRENT ROW
+            ), 0), 2) AS rolling28_otif_pct
+          FROM daily
+          ORDER BY report_date DESC, product_code
+          LIMIT 10;
+        expectedOutcome: "Rolling 28-day OTIF %, useful for trend visualizations that smooth weekly seasonality."
+
+# =============================================================================
+# End of Contract
+# =============================================================================

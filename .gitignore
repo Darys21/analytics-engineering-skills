@@ -1,0 +1,107 @@
+# ============================================================
+# Analytics Engineering Skills Repository — .gitignore
+# Official remote: https://github.com/Darys21/analytics-engineering-skills.git
+# ============================================================
+
+# ----- Local / working files NEVER pushed to the public repo -----
+# Mega Prompt (source document, private, should NOT be published)
+Mega Prompt*.md
+Mega*Prompt*.md
+
+# Local project context (private per-project, not part of the generic skill)
+CONTEXT.local.md
+.project-context.md
+local_context*.md
+adrs-local/
+
+# ----- Environments -----
+.venv/
+venv/
+env/
+ENV/
+.venv-*/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ----- Editors / IDEs -----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ----- Notebook outputs -----
+.ipynb_checkpoints/
+*.ipynb.bak
+
+# ----- Logs / caches -----
+*.log
+logs/
+.cache/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+coverage/
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+.coverage
+.coverage.*
+
+# ----- Secrets / local config -----
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+config.local.*
+*.local.ini
+
+# ----- Data / sample datasets (avoid accidentally shipping CSVs/Parquets) -----
+data/raw/
+data/interim/
+data/processed/
+*.csv
+!templates/*.csv
+!scripts/**/sample*.csv
+*.parquet
+*.tsv
+
+# ----- Power BI local exports -----
+*.pbix
+*.pbit
+*.bim.backup
+/extracts/
+/tmp/
+/artifacts/
+/_work/
+
+# ----- OS / junk -----
+*.bak
+*.tmp
+*.old
+*.orig

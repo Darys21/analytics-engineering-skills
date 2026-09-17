@@ -1,0 +1,300 @@
+{
+  "version": "1.0",
+  "description": "Evaluation cases for the Analytics Engineering Skills Repository. Each case asserts expected workflow routing and behavior, and explicitly flags unwanted actions (over-engineering, pointless questions, jumping to solutions). Cases cover both positive (correct) routing and negative (near-miss or anti-pattern) prompts to test restraint.",
+  "cases": [
+    {
+      "id": "eval-001",
+      "title": "Ambiguous dashboard request",
+      "difficulty": "medium",
+      "type": "positive",
+      "input": "Create a sales dashboard for me.",
+      "expected_workflow_routing": ["grill", "business-analysis"],
+      "expected_behaviors": [
+        "Asks high-value clarification questions about persona, decision, KPIs, grain, dimensions, timeframe.",
+        "Does not start building charts or writing DAX before business problem is defined.",
+        "Converts dashboard request into a decision problem."
+      ],
+      "expected_not": [
+        "Does not immediately suggest a stack (Power BI / Tableau / dbt) without understanding context.",
+        "Does not start producing a star schema or SQL model in the first response."
+      ],
+      "references_loaded": ["workflows/grill.md", "workflows/business-analysis.md"]
+    },
+    {
+      "id": "eval-002",
+      "title": "Why did revenue drop? — Business diagnostic",
+      "difficulty": "medium",
+      "type": "positive",
+      "input": "Our revenue decreased 12% WoW. Why?",
+      "expected_workflow_routing": ["business-analysis", "data-discovery", "statistics"],
+      "expected_behaviors": [
+        "Clarifies scope of revenue (which business line, region, channel, grain).",
+        "Confirms data source, freshness, and known changes that week.",
+        "Performs segmented and driver-based breakdowns before conclusions.",
+        "Distinguishes correlation vs. causation; explicitly calls out assumptions."
+      ],
+      "expected_not": [
+        "Does not jump to a single causal story on day 1.",
+        "Does not propose ML / forecasting for a root-cause diagnostic."
+      ],
+      "references_loaded": ["workflows/business-analysis.md", "workflows/data-discovery.md", "workflows/statistics.md"]
+    },
+    {
+      "id": "eval-003",
+      "title": "DAX optimization request",
+      "difficulty": "medium",
+      "type": "positive",
+      "input": "Optimize this DAX measure: CALCULATE(SUMX(FILTER(ALL(FactSales), FactSales[Region]=MAX(DimRegion[Region])), FactSales[Amount]))",
+      "expected_workflow_routing": ["diagnose", "dax-analysis", "optimize"],
+      "expected_behaviors": [
+        "Establishes baseline: correctness of current measure (check business logic), then timing/Server Timings baseline.",
+        "Identifies bottleneck: FILTER over ALL(entire fact) inside an iterator.",
+        "Proposes simpler CALCULATE with filter argument (e.g., via relationship or TREATAS) and benchmarks.",
+        "Validates numerical equivalence after optimization."
+      ],
+      "expected_not": [
+        "Does not rewrite into a form that changes business semantics (e.g., changing filter context to different grain) without flagging.",
+        "Does not claim performance gain without a measured baseline."
+      ],
+      "references_loaded": ["workflows/diagnose.md", "workflows/dax-analysis.md", "workflows/optimize.md", "references/dax.md", "references/performance.md"]
+    },
+    {
+      "id": "eval-004",
+      "title": "Duplicate rows in mart",
+      "difficulty": "high",
+      "type": "positive",
+      "input": "Our mart_sales_report has 10x more rows than last week. Users complaining about wrong totals.",
+      "expected_workflow_routing": ["diagnose", "data-quality", "data-discovery"],
+      "expected_behaviors": [
+        "Bisects: source → bronze → silver → gold → mart to find the first layer producing row count explosion.",
+        "Suspects: changed join key, cross-product from missing join condition, upstream batch re-run + append, changed grain.",
+        "Tests hypotheses and isolates root cause; distinguishes root cause vs. contributing factors.",
+        "Proposes workaround if urgent, then permanent fix; regression checks adjacent slices.",
+        "Recommends data-quality checks (uniqueness on grain-defining columns, row-count anomaly alert) to prevent recurrence."
+      ],
+      "expected_not": [
+        "Does not add DISTINCT at the top layer as the only fix without root-causing.",
+        "Does not blame users or 'bad data' without evidence."
+      ],
+      "references_loaded": ["workflows/diagnose.md", "workflows/data-quality.md", "workflows/data-discovery.md", "references/data-modeling.md"]
+    },
+    {
+      "id": "eval-005",
+      "title": "Unnecessary ML request (near-miss negative)",
+      "difficulty": "medium",
+      "type": "negative_near_miss",
+      "input": "Use ML to predict our daily sales for next year. Pick the fanciest model.",
+      "expected_workflow_routing": ["grill", "business-analysis", "statistics"],
+      "expected_behaviors": [
+        "Asks: decision to be supported, required accuracy, baseline (e.g., seasonal naive + last year + moving average), error costs, and value proposition vs. baseline.",
+        "Implements non-ML baselines first (seasonal naive, moving average, simple regression).",
+        "Only proposes ML if it materially outperforms baselines on the primary metric AND adds business value vs. operation cost.",
+        "Explicitly refuses 'pick the fanciest' criterion and explains why."
+      ],
+      "expected_not": [
+        "Does not immediately recommend XGBoost/LSTM/neural net because 'ML is best'.",
+        "Does not skip baselines.",
+        "Does not skip data-science reference progression (descriptive → diagnostic → baseline → predictive)."
+      ],
+      "references_loaded": ["workflows/grill.md", "workflows/business-analysis.md", "workflows/data-science.md", "references/statistics.md"]
+    },
+    {
+      "id": "eval-006",
+      "title": "Source reconciliation across two systems",
+      "difficulty": "high",
+      "type": "positive",
+      "input": "Reconcile the revenue numbers between ERP and CRM. They never match.",
+      "expected_workflow_routing": ["grill", "business-analysis", "data-discovery", "data-quality"],
+      "expected_behaviors": [
+        "Defines reconciliation dimensions: technical equality vs. semantic equality vs. business equality.",
+        "Grain check per source: is revenue per invoice line, per order, per posted day, per recognized-day?",
+        "Statuses: what counts in each system (booked, shipped, invoiced, paid?). Timing cutoffs, timezone, returns/credits treatment.",
+        "Presents a reconciliation matrix with differences quantified per dimension, and recommends mapping / source-of-truth rules."
+      ],
+      "expected_not": [
+        "Does not simply pick one system as 'right' without defining rules.",
+        "Does not stop at 'they differ by 4.3%' without explaining drivers."
+      ],
+      "references_loaded": ["workflows/data-quality.md", "workflows/data-discovery.md", "workflows/business-analysis.md", "references/data-quality.md"]
+    },
+    {
+      "id": "eval-007",
+      "title": "SQL optimization candidate",
+      "difficulty": "medium",
+      "type": "positive",
+      "input": "This query runs for 10 minutes on 1B rows, make it faster. [includes a 5-CTE correlated subquery with many SELECT * and implicit joins]",
+      "expected_workflow_routing": ["diagnose", "sql-analysis", "optimize"],
+      "expected_behaviors": [
+        "Asks for or proposes to capture actual execution plan, timing, IO, and size.",
+        "Separates anti-patterns (SELECT *, implicit joins without ON, correlated subqueries rewritable as window functions / joins).",
+        "Identifies bottleneck, changes one factor at a time, benchmarks each iteration.",
+        "Validates numerical equivalence after rewrite."
+      ],
+      "expected_not": [
+        "Does not apply all 'best practices' in a single rewrite, making attribution impossible.",
+        "Does not measure only end-to-end time without attributing to plan operations."
+      ],
+      "references_loaded": ["workflows/diagnose.md", "workflows/sql-analysis.md", "workflows/optimize.md", "references/sql.md", "references/performance.md"]
+    },
+    {
+      "id": "eval-008",
+      "title": "Power BI dashboard UX check",
+      "difficulty": "medium",
+      "type": "positive",
+      "input": "We built this Power BI report. Users say it's confusing and slow. Review it.",
+      "expected_workflow_routing": ["review", "dashboard-ux", "visualization", "optimize"],
+      "expected_behaviors": [
+        "Applies review workflow across 8 dimensions: business, data, logic, engineering, perf, security, UX, ops.",
+        "Checks dashboard UX hierarchy: Context → KPI → Diagnosis → Detail → Action.",
+        "Checks visualizations: each answers a question, accessible, no chart junk.",
+        "Captures Performance Analyzer baseline, identifies worst visual(s), routes to optimize if > threshold."
+      ],
+      "expected_not": [
+        "Does not only say 'make prettier'.",
+        "Does not skip performance if slow was explicitly mentioned."
+      ],
+      "references_loaded": ["workflows/review.md", "workflows/dashboard-ux.md", "workflows/visualization.md", "workflows/optimize.md", "references/power-bi.md"]
+    },
+    {
+      "id": "eval-009",
+      "title": "Daily pipeline design (operational scenarios)",
+      "difficulty": "high",
+      "type": "positive",
+      "input": "Design and plan the daily pipeline that ingests ERP raw, builds marts, and refreshes Power BI. SLA: marts ready by 07:00.",
+      "expected_workflow_routing": ["analytics-engineering", "pipeline", "data-quality", "observability", "delivery"],
+      "expected_behaviors": [
+        "Defines DAG and SLOs. Specifies bronze → silver → gold layers.",
+        "Idempotency, incremental, watermark, checkpointing, atomic publish.",
+        "Explicit operational scenarios: fails 06:17, late data 3h, 10k duplicates, schema change, silent wrong numbers.",
+        "Monitoring and alerting design: failure, duration, freshness, row-count anomaly, DQ failures, semantic refresh failures.",
+        "Deployment, rollback, CI, runbook, and owner handoff."
+      ],
+      "expected_not": [
+        "Does not produce a picture of a DAG and stop.",
+        "Does not omit failure/recovery/alerting and declare done.",
+        "Does not hardcode secret credentials in the pipeline sketch."
+      ],
+      "references_loaded": ["workflows/analytics-engineering.md", "workflows/pipeline.md", "workflows/data-quality.md", "workflows/delivery.md", "references/analytics-engineering.md", "references/observability.md"]
+    },
+    {
+      "id": "eval-010",
+      "title": "Stat vs. practical significance",
+      "difficulty": "medium",
+      "type": "negative_near_miss",
+      "input": "A/B test shows p < 0.05, so the new feature works. Ship it?",
+      "expected_workflow_routing": ["business-analysis", "statistics"],
+      "expected_behaviors": [
+        "Checks experimental design: randomization, sample size, power, look-elsewhere / multiple comparisons, leakage in metrics.",
+        "Reports effect size, confidence intervals, and practical significance ($ or user impact) vs. statistical significance.",
+        "Considers segments: did it work everywhere or only in one region? Simpson's paradox check.",
+        "Connects to business decision: cost to ship vs. impact, plus rollout plan and monitoring.",
+        "Answers 'ship it?' with conditions, not blind yes/no based on p < 0.05 alone."
+      ],
+      "expected_not": [
+        "Does not say 'p<0.05 → yes' without checking practical significance and effect size.",
+        "Does not ignore multiple comparisons if many metrics were tested."
+      ],
+      "references_loaded": ["workflows/statistics.md", "references/statistics.md"]
+    },
+    {
+      "id": "eval-011",
+      "title": "Project review: inherited analytics repo",
+      "difficulty": "high",
+      "type": "positive",
+      "input": "We inherited a dbt + Snowflake + Power BI analytics project with no docs and spotty tests. Give us a structured review.",
+      "expected_workflow_routing": ["review", "data-discovery", "data-quality", "observability"],
+      "expected_behaviors": [
+        "Maps: what dashboards depend on what marts depend on what models depend on what sources.",
+        "Applies review workflow across all dimensions.",
+        "Triages findings by severity (Blocking / High / Medium / Low / Advisory).",
+        "Recommends order of fixes: e.g., grain-defining uniqueness tests first, freshness monitors second, documentation third, optimization fourth.",
+        "Surfaces unknown unknowns and asks clarifying questions where artifacts are missing."
+      ],
+      "expected_not": [
+        "Does not produce a 2-line summary 'needs tests and docs'.",
+        "Does not claim correctness of anything it could not inspect."
+      ],
+      "references_loaded": ["workflows/review.md", "workflows/data-discovery.md", "workflows/data-quality.md", "workflows/delivery.md"]
+    },
+    {
+      "id": "eval-012",
+      "title": "Pipeline fails at 06:17 (debugger)",
+      "difficulty": "high",
+      "type": "positive",
+      "input": "Pipeline failed at 06:17 this morning with generic 'job failed'. Yesterday it was fine. Fix it.",
+      "expected_workflow_routing": ["diagnose"],
+      "expected_behaviors": [
+        "Follows OBSERVE → REPRODUCE → ISOLATE → HYPOTHESIZE → TEST → FIX → REGRESSION → DOCUMENT.",
+        "Collects: exact error, step that failed, logs, input data changes yesterday→today, deploys/infra changes, upstream schema changes, change in row counts.",
+        "Hypothesizes ≥ 2 causes, tests each.",
+        "Distinguishes workaround vs. permanent fix; applies minimal targeted fix.",
+        "Adds regression check: monitor/alert/test that would catch this next time."
+      ],
+      "expected_not": [
+        "Does not suggest random retries followed by 'it passed, done'.",
+        "Does not skip regression test."
+      ],
+      "references_loaded": ["workflows/diagnose.md", "references/observability.md", "workflows/pipeline.md"]
+    },
+    {
+      "id": "eval-013",
+      "title": "Data modeling: 3 fact tables at different grains",
+      "difficulty": "high",
+      "type": "positive",
+      "input": "We have orders (header+lines), shipments, and invoices at different grains. Model this for Power BI.",
+      "expected_workflow_routing": ["grill", "business-analysis", "data-modeling", "tmdl-analysis", "dax-analysis"],
+      "expected_behaviors": [
+        "Clarifies business processes, KPIs, and grain for each fact explicitly.",
+        "Recommends: 3 separate fact tables (order_lines, shipments, invoices) at their true grains + conformed dims (date, customer, product, etc.).",
+        "Role-playing date dimensions with inactive relationships + USERELATIONSHIP base measures.",
+        "Addresses semi-additive measures: what can be summed across what dims, what cannot.",
+        "Hints at metric definitions and (for Power BI) calculation group patterns for reusability."
+      ],
+      "expected_not": [
+        "Does not concatenate everything into one giant wide-table fact at mixed grain.",
+        "Does not create multiple date tables physically duplicated with data."
+      ],
+      "references_loaded": ["workflows/data-modeling.md", "workflows/tmdl-analysis.md", "workflows/dax-analysis.md", "references/data-modeling.md", "references/power-bi.md"]
+    },
+    {
+      "id": "eval-014",
+      "title": "Chart selection: parts-of-whole with 12 segments",
+      "difficulty": "low",
+      "type": "negative_near_miss",
+      "input": "Create a pie chart of our 12 product categories' revenue share.",
+      "expected_workflow_routing": ["visualization", "business-analysis"],
+      "expected_behaviors": [
+        "Explains why pie is poor for 12 categories (hard to order, hard to compare).",
+        "Recommends bar / lollipop / dot plot ranked by share, with percentage labels + total.",
+        "If 'exec insists on pie': proposes 10 + 'Other' aggregated, ranked slices, plus a companion ranked table or bar as the primary view.",
+        "States question the chart is intended to answer."
+      ],
+      "expected_not": [
+        "Does not silently build a 12-slice pie with default rainbow palette and call it done.",
+        "Does not build a 3D pie, ever."
+      ],
+      "references_loaded": ["workflows/visualization.md", "references/visualization.md"]
+    },
+    {
+      "id": "eval-015",
+      "title": "Secrets in notebook (security)",
+      "difficulty": "medium",
+      "type": "negative_near_miss",
+      "input": "My notebook has the DB password hardcoded. Make this pipeline production-ready.",
+      "expected_workflow_routing": ["grill", "pipeline", "delivery"],
+      "expected_behaviors": [
+        "Immediately flags hardcoded secret as Critical severity. Requires rotation if it ever touched git / shared storage.",
+        "Recommends: local .env + gitignore → CI secrets → secret store (Key Vault, etc.) per environment.",
+        "Scans notebooks/history for any other secrets; recommends secret-scan tooling in CI.",
+        "Separates dev/test/prod connections via least-privilege service principals, not personal accounts.",
+        "Checks logs / print statements for accidental credential exposure."
+      ],
+      "expected_not": [
+        "Does not just add a comment '# TODO: fix secrets later'.",
+        "Does not accept moving the password to a .py file committed to git as 'better'.",
+        "Does not forget to recommend rotation for a secret that has already leaked."
+      ],
+      "references_loaded": ["references/security.md", "workflows/delivery.md", "references/ci-cd.md"]
+    }
+  ]
+}

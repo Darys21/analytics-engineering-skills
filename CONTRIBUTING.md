@@ -10,6 +10,41 @@ lives in `docs/contribution-guide.md`.
 
 ---
 
+## 0. Local setup — before you contribute
+
+Install the repository's pinned Python dependencies so validators behave the
+same on your machine as in CI. The dependency footprint is intentionally tiny
+(one optional dep, `PyYAML`, plus stdlib for everything else).
+
+```bash
+# Windows (use py launcher)
+py -m venv .venv
+.venv\Scripts\activate
+py -m pip install --upgrade pip
+py -m pip install -r requirements.txt
+
+# Unix / macOS
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install --upgrade pip
+python3 -m pip install -r requirements.txt
+```
+
+Verify by running:
+
+```bash
+# Windows
+py scripts/validate_project.py --strict
+# Unix
+python3 scripts/validate_project.py --strict
+```
+
+It should exit 0 on a clean clone with `PyYAML available: yes` in the header.
+If you see `PyYAML available: no (using fallbacks)`, re-run the
+`pip install -r requirements.txt` step above.
+
+---
+
 ## 1. Repository Architecture
 
 This repository has exactly seven top-level directories. Each has a single

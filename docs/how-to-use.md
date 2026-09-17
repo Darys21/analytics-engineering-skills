@@ -51,11 +51,20 @@ Concrete steps:
 git clone https://github.com/Darys21/analytics-engineering-skills.git
 cd analytics-engineering-skills
 
-# 2. Verify the repo is internally consistent (stdlib only, no deps required)
+# 2. (Recommended, optional) install requirements.txt so validate_project.py
+#    uses strict PyYAML parsing instead of the documented heuristic fallback.
+#    Windows (py launcher):
+py -m pip install --upgrade pip
+py -m pip install -r requirements.txt
+#    Unix:
+#    python3 -m pip install --upgrade pip
+#    python3 -m pip install -r requirements.txt
+
+# 3. Verify the repo is internally consistent
 py scripts/validate_project.py --strict
 ```
 
-The `SKILL.md` manifest sits at the repository root. Point your TRAE-style agent loader at this folder — the loader reads the YAML frontmatter and registers the skill under `name: analytics-engineering-skills`. Optional Python dependencies (`pandas`, `pyarrow`) are only needed for the richer Parquet / stats modes of `quality_check.py`; the core validators run entirely on Python 3.9+ stdlib.
+The `SKILL.md` manifest sits at the repository root. Point your TRAE-style agent loader at this folder — the loader reads the YAML frontmatter and registers the skill under `name: analytics-engineering-skills`. Runtime deps are intentionally minimal: `requirements.txt` ships a single optional pinned dep (`PyYAML>=6.0`); the core validators still run entirely on Python 3.9+ stdlib. Optional extras (`pandas`, `pyarrow`) unlock the richer Parquet / stats modes of `quality_check.py` only and degrade to stdlib CSV + basic stats if absent.
 
 ---
 

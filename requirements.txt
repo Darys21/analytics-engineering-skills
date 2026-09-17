@@ -1,0 +1,34 @@
+# ============================================================================
+# Analytics Engineering Skills Repository — Python dependencies
+# Official remote: https://github.com/Darys21/analytics-engineering-skills.git
+# ============================================================================
+#
+# Design principle: ZERO mandatory third-party runtime dependencies.
+# All validator scripts (scripts/*.py) are stdlib-only by default. This keeps
+# CI, offline use, and security/supply-chain surface minimal.
+#
+# Install (optional — skip if you only want stdlib behaviour):
+#   Windows (use py launcher):   py -m pip install --upgrade pip
+#                                py -m pip install -r requirements.txt
+#   Linux / macOS:               python3 -m pip install --upgrade pip
+#                                python3 -m pip install -r requirements.txt
+#
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# OPTIONAL — PyYAML (recommended, not required)
+# ----------------------------------------------------------------------------
+# Used only by scripts/validate_project.py for:
+#   1.  SKILL.md YAML frontmatter precise parsing
+#   2.  templates/data-contract.yml strict validation
+# When PyYAML is NOT installed, validate_project.py falls back to a
+# documented minimal heuristic parser and prints an explicit notice on
+# every run:
+#       PyYAML available: no (using fallbacks)
+# Installing PyYAML removes the heuristic notice and gives stricter
+# frontmatter/data-contract validation. The validators still PASS/FAIL
+# deterministically without it.
+#
+# Pinning is intentionally permissive (>= 6.0, includes 7.x branch). If you
+# need reproducible SHAs, use pip-tools / pip-compile on top of this file.
+PyYAML>=6.0

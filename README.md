@@ -63,6 +63,10 @@ analytics-engineer-agent-skills/
 
 - **Python 3.9+** (3.11 recommended) on Windows, Linux, or macOS.
 - Optional, but recommended:
+  - `PyYAML` (from `requirements.txt`, pinned `>=6.0`): strict frontmatter
+    and data-contract YAML validation in `validate_project.py`. Without it,
+    a documented minimal fallback parser is used (still deterministic,
+    prints a notice on every run).
   - `pandas` and `pyarrow` for `quality_check.py` Parquet + richer stats.
   - No LLM API keys are required to run the scripts in `scripts/` — they are
     fully deterministic.
@@ -72,7 +76,7 @@ analytics-engineer-agent-skills/
 ```bash
 # 1. Clone the repository.
 git clone https://github.com/Darys21/analytics-engineering-skills.git
-cd analytics-engineer-agent-skills
+cd analytics-engineering-agent-skills
 
 # 2. (Optional) create a virtual environment.
 # Windows (py launcher):
@@ -82,8 +86,19 @@ py -m venv .venv
 # python3 -m venv .venv
 # source .venv/bin/activate
 
-# 3. Install optional data-quality dependencies.
-pip install pandas pyarrow
+# 3. Install the pinned dependency set (recommended — pulls PyYAML >= 6.0
+#    and removes the "PyYAML not installed, using fallbacks" notice from
+#    validate_project.py output).
+#    Windows (py launcher):
+py -m pip install --upgrade pip
+py -m pip install -r requirements.txt
+#    Unix:
+#    python3 -m pip install --upgrade pip
+#    python3 -m pip install -r requirements.txt
+
+# 4. (Optional, not required) install richer stats / Parquet helpers for
+#    quality_check.py.
+py -m pip install pandas pyarrow
 ```
 
 ### Verify Activation

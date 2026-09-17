@@ -1,5 +1,18 @@
 # DAX Reference Guide (Data Analysis Expressions)
 
+## Claim categories
+This reference uses five categories of guidance. Do not treat all recommendations as equally strict.
+
+| Category | Meaning | Action if violated |
+|----------|---------|--------------------|
+| **Hard correctness rule** | Breaking this produces provably wrong numbers (wrong totals, wrong filter context, silent wrong semantics) in all or nearly-all cases. | MUST fix before merge. |
+| **Preferred pattern** | An established approach that is more readable, more testable, or less bug-prone than alternatives. Functional alternatives exist but this is the default unless there is a specific reason. | SHOULD use; document deviation if not. |
+| **Performance heuristic** | An observation correlated with better performance in most workloads; the actual bottleneck must be measured, not assumed from the pattern alone. | INVESTIGATE when performance baseline shows the bottleneck is in this area. |
+| **Maintainability recommendation** | Improves readability, debugging, modularity, or onboarding cost. Not a correctness or performance driver. | SHOULD use; weight against local-team conventions. |
+| **Context-dependent recommendation** | The right choice depends on model shape, business semantics, or engine version; no universal default. | EVALUATE against the specific case; do not apply mechanically. |
+
+Throughout this document, guidance is implicitly **preferred pattern** or **maintainability recommendation** unless explicitly labeled otherwise. Labels are called out inline where the distinction matters.
+
 ## When Used
 DAX is the **calculation language for Microsoft tabular engines**:
 - **Power BI semantic models** — measures, calculated columns, calculated tables, calculation groups
@@ -32,12 +45,14 @@ Specifically for:
 4. **Missing `ALLSELECTED()` for visual totals** — percent of grand total with `DIVIDE(SUM(Sales[Amt]), CALCULATE(SUM(Sales[Amt]), ALL(Sales)))` ignores slicers; use `ALLSELECTED` to respect visual filters.
 5. **Semi-additive measures with plain `SUM` + date at day grain** — "Account Balance" summed across months double-counts; must use `LASTDATE` / `LASTNONBLANKVALUE`.
 6. **`IF(CALCULATE(COUNTROWS(...)) > 0, [MeasureA], [MeasureB])`** — Evaluates COUNTROWS *and* both measures every time (EAGER evaluation plan); anti-pattern. Use `IF(ISBLANK([Base]), …)` or variables + `HASONEVALUE`.
-7. **`EARLIER` / `EARLIEST` instead of variables** — Legacy, hard-to-read; use `VAR CurrentRowCol = Table[Col]` inside iterators.
+7. **`EARLIER` / `EARLIEST` without variables** — Variables are almost always preferred over EARLIER for readability. EARLIER remains valid DAX. EARLIER/EARLIEST access an outer row context; variables achieve the same and are clearer. Use `VAR CurrentRowCol = Table[Col]` before the inner iterator and reference the variable.
 8. **Using `RELATEDTABLE` in a calculated column on the 1-side of a 1:many** — Expensive, materializes a table only to aggregate; better to push to measure with CALCULATE or pre-aggregate in SQL.
 9. **Ignoring blank handling in division** — `X / Y` returns NaN/Infinity in DAX when `Y = 0` or blank; always use `DIVIDE(numerator, denominator, <alternate>)`.
 10. **Bi-directional relationships + ambiguous paths** — creates subtle filter-direction bugs with diamond schemas; prefer single-direction and explicit bidirectional only when required + tested.
-11. **`ALL(Table)` vs `ALL(Table[Column])`** — `ALL(Table)` removes filters on *every* column; use `ALL(Table[Column])` to remove only one column filter (e.g., for time intelli
-gence on date only, keeping all other slicer selections).
+11. **`ALL(Table)` vs `ALL(Table[Column])` vs `REMOVEFILTERS`** —
+    - `ALL(Table)` removes filters on *every* column and also returns the full table as a table expression (usable as iterator input).
+    - `ALL(Table[Column])` removes filters only on that single column and returns the distinct column values as a table.
+    - `REMOVEFILTERS(Table)` or `REMOVEFILTERS(Table[Column])` removes filters *only* — it does not return a table input to iterators. **Context-dependent recommendation:** `REMOVEFILTERS` is preferred over `ALL()` when the intention is *only* to clear filters (not to provide a table to an iterator), because the intent is explicit and it avoids accidentally materializing rows. `REMOVEFILTERS` is available in modern Analysis Services (2019+), Power BI, and Microsoft Fabric; for older engines use `ALL()` in the same position.
 12. **Hardcoding date literals as strings** — `"01/01/2024"` parses as MDY on some servers and DMY on others; use `DATE(2024,1,1)`.
 
 ---
@@ -262,13 +277,13 @@ RETURN
 ## DAX Studio: Debugging Workflow
 
 1. **Clear cache between runs**: "Clear Cache" then "Run".
-2. **Server Timings**: enable → see SE vs FE % and # SE queries (calls). If FE > 30%, you're in measure-callbacks (iterator over measure, bad).
+2. **Server Timings**: enable → measure SE vs FE CPU %, SE query count, and rows scanned per call. Establish baseline first; then identify the bottleneck. Measure storage engine vs formula engine; the bottleneck drives optimization, not an arbitrary count. A high FE share relative to your workload baseline typically indicates iterator callbacks (measure-per-row) or complex FILTER materialization; a high SE share indicates scan/aggregation bottlenecks.
 3. **Query Plan** — Physical Plan shows:
-   - `SpoolOperator_*`: materialised intermediate (expensive, note the size)
-   - `Iteration=Dense` / `Lookup`: dense iterate is good; Lookup + dense iterate = high cost
-   - `Aggregation(...)` + `Scan_Vertipaq`: SE-heavy, usually good
-4. **Benchmark**: Capture duration; then break the measure into pieces and see which contributes 80%.
-5. **`EVALUATE ROW("x", [Measure])`** against a heavy filter context to isolate one measure.
+   - `SpoolOperator_*`: materialised intermediate. Compare spool size against the model's working memory baseline; any spool that is large relative to expected intermediate cardinality is worth investigating.
+   - `Iteration=Dense` / `Lookup`: dense iterate is efficient for in-memory column data; Lookup combined with dense iterate on high-cardinality tables correlates with high cost.
+   - `Aggregation(...)` + `Scan_Vertipaq`: SE-heavy, usually efficient unless scan range is much wider than the filter context implies.
+4. **Benchmark**: Capture baseline duration; then break the measure into pieces and identify which component contributes 80% of the cost (Pareto). Change one factor at a time and re-measure.
+5. **`EVALUATE ROW("x", [Measure])`** against a representative filter context to isolate one measure.
 
 ### Example Anti-Pattern → Fix
 
@@ -317,13 +332,13 @@ RETURN IF(NOT ISBLANK(Base), Base / 1.2, BLANK())
 
 ## What to Inspect First (Wrong Numbers / Slow Queries)
 
-1. **Is Date table marked & continuous?** Time intelligence silently returns wrong results otherwise.
+1. **Is Date table marked & continuous?** Time intelligence silently returns wrong results otherwise. **Hard correctness rule.**
 2. **Cardinality & direction of the relationship path:** Does a bidirectional or many-to-many silently filter a dimension where it shouldn't?
-3. **ALL vs ALLSELECTED vs KEEPFILTERS:** If totals are wrong vs slicers, 90% chance the filter is using `ALL` and should use `ALLSELECTED`.
+3. **ALL vs ALLSELECTED vs KEEPFILTERS vs REMOVEFILTERS:** If totals are wrong vs slicers, check whether the filter is using `ALL` where it should use `ALLSELECTED` to respect visual filters. When intent is only to clear filters (not provide a table to iterate), prefer `REMOVEFILTERS` over `ALL` for clarity on modern engines.
 4. **BLANK propagation:** `COALESCE` vs `BLANK()`. Blank numerator or denominator returning unexpected non-BLANK? Use DIVIDE + `IF(NOT ISBLANK(base), …, BLANK())`.
-5. **Context transition in iterator:** `SUMX(VALUES(...), [Measure])` — print the cardinality of VALUES(); is it 200k? If so, you need a better aggregation.
-6. **DAX Studio Server Timings:** Is FE > SE? Then you're doing row-by-row callbacks. Is # SE queries > 50 per measure? Look for pattern "CALCULATE per customer per month…".
-7. **Physical plan Spool size:** Any spool > 1 GB is suspicious; break into a smaller calc.
+5. **Context transition in iterator:** `SUMX(VALUES(...), [Measure])` — examine the cardinality of VALUES(); compare the actual cardinality against the baseline and decide if a better aggregation is possible. `CALCULATE` wrapping an aggregator inside an iterator or calculated column performs context transition (row context → filter context); this is valid and sometimes required. In simple standalone cases where no context transition is needed and no filter modifier is present, `CALCULATE(SUM(...))` is a POTENTIAL simplification — verify before removing; it is NOT universally incorrect.
+6. **DAX Studio Server Timings:** Establish baseline and bottleneck. Measure storage engine vs formula engine; the bottleneck drives optimization, not an arbitrary count or percentage. If FE share is much higher than SE share for a given workload baseline, look for row-by-row measure callbacks. If SE query count is much higher than expected for a simple measure vs. similar patterns like "CALCULATE per dimension member" may be the driver.
+7. **Physical plan Spool size:** Compare spool sizes against the expected intermediate cardinality and the model's working memory baseline; investigate any spool that is disproportionately large relative to the output. Break large spools into smaller calculations.
 8. **Filter direction on roles / RLS:** Are RLS predicates applied to a dimension that bi-directionally filters a huge fact? Restructure to filter fact directly.
 9. **Auto-exist subtleties:** Two slicers on the same table (Customer[Country], Customer[Segment]) auto-intersect; across tables they cross join. If totals differ, this is likely.
 10. **Precision loss on currency:** `SUM` of decimals accumulated across float arithmetic → use DECIMAL type in model; avoid rounding at intermediate steps.

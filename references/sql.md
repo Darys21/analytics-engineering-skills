@@ -23,16 +23,16 @@ SQL is the **primary language** for:
 
 ## Common Mistakes
 
-1. **`SELECT *` in production code** — causes schema-breakage, over-fetching, and ambiguous column joins
-2. **Implicit `CROSS JOIN` via comma syntax** (`FROM a, b WHERE a.id = b.id`) — accidental Cartesian products when predicates are missing
-3. **`NULL` = `NULL` comparisons** — SQL uses three-valued logic; use `IS NULL` or `IS NOT DISTINCT FROM`
-4. **Filtering on `LEFT JOIN`ed columns in `WHERE`** — silently converts to `INNER JOIN`; move conditions to `ON`
-5. **Unbounded window frames** — default `RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` differs from `ROWS`; always specify for performance and correctness
-6. **`COUNT(column)` when meaning `COUNT(*)`** — `COUNT(col)` excludes NULLs; `COUNT(*)` counts rows
-7. **`DISTINCT` used to "fix" duplicate rows** — symptom of bad joins or model issues; deduplicate explicitly with `ROW_NUMBER()`
-8. **Date literals without timezone awareness** — `'2024-01-01'` behaves differently across timezones and session settings
-9. **Correlated subqueries on large tables** — row-by-row execution; rewrite as `JOIN` or window function
-10. **Deeply nested subqueries without CTEs** — unreadable and hard to debug; refactor to CTEs
+1. **`SELECT *` in production code** — causes schema-breakage, over-fetching, and ambiguous column joins. **Maintainability recommendation.**
+2. **Implicit `CROSS JOIN` via comma syntax** (`FROM a, b WHERE a.id = b.id`) — accidental Cartesian products when predicates are missing. **Hard correctness rule (risk).**
+3. **`NULL` = `NULL` comparisons** — SQL uses three-valued logic; `NULL = NULL` evaluates to UNKNOWN, not TRUE. Use `IS NULL` or `IS NOT DISTINCT FROM`. **Hard correctness rule.**
+4. **Filtering on `LEFT JOIN`ed columns in `WHERE`** — silently converts to `INNER JOIN` by filtering out NULL-extended rows. Move predicates to `ON` or explicitly handle NULLs. **Hard correctness rule.**
+5. **Unbounded window frames** — default `RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` differs from `ROWS` in semantics and performance; always specify explicitly for correctness and predictability. **Hard correctness rule (semantics) + performance heuristic.**
+6. **`COUNT(column)` when meaning `COUNT(*)`** — `COUNT(col)` excludes NULLs; `COUNT(*)` counts all rows including full-NULL rows. Choose intentionally based on whether NULLs should count. **Hard correctness rule.**
+7. **`DISTINCT` used to "fix" duplicate rows** — symptom of bad joins or model issues; deduplicate explicitly with `ROW_NUMBER()` and understand the source of duplication. **Hard correctness rule (diagnostic).**
+8. **Date literals without timezone awareness** — `'2024-01-01'` behaves differently across timezones, session settings, and dialects. Use explicit timezone-typed literals or anchor to UTC. **Hard correctness rule (risk).**
+9. **Correlated subqueries on large tables** — row-by-row execution; rewrite as `JOIN` or window function when the optimizer does not decorrelate automatically. **Performance heuristic.**
+10. **Deeply nested subqueries without CTEs** — unreadable and hard to debug; refactor to CTEs. **Maintainability recommendation.**
 
 ---
 
@@ -245,6 +245,160 @@ WHEN NOT MATCHED THEN INSERT (customer_bk, name, email, country, created_at, upd
 
 ---
 
+## Dialect Specific Notes
+
+The following sections detail behavior differences across five common SQL dialects. For portable code, wrap dialect-specific operations in macros (e.g., dbt macros) and test both branches.
+
+### T-SQL (SQL Server, Azure SQL DB, Azure Synapse Dedicated)
+
+1. **String concatenation & NULL propagation:**
+   - `a + b` operator: propagates NULL (if either operand is NULL, result is NULL).
+   - `CONCAT(a, b, c)` function: treats NULLs as empty strings (no NULL propagation); returns a string concatenation of all arguments.
+   - `||` operator: NOT supported by default; requires `SET QUOTED_IDENTIFIER OFF` + `SET ANSI_PADDING ON` and even then behaves inconsistently. **Preferred pattern:** Use `CONCAT()` for portable non-NULL-propagating concatenation, or `+` with explicit `ISNULL/COALESCE` guards.
+
+2. **Date functions:**
+   - `DATEADD(day, 7, order_date)` — date part is a keyword, not a string; returns the same type as input.
+   - `DATEDIFF(day, start_date, end_date)` — signed integer difference in the specified date part boundary crossings.
+   - `DATE_TRUNC` is NOT available prior to SQL Server 2022. Use `DATEADD(DAY, 1 - DAY(ts), CAST(ts AS DATE))` style workarounds for month-truncation on older versions; `DATETRUNC(month, ts)` on SQL Server 2022+.
+   - `GETDATE()` / `SYSDATETIME()` return server-local time; use `GETUTCDATE()` / `SYSUTCDATETIME()` for UTC.
+
+3. **QUALIFY row_number filtering:**
+   - NOT supported. Wrap window functions in a CTE or subquery and filter on the ranking column in an outer WHERE: `WITH r AS (SELECT *, ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) AS rn FROM src) SELECT * FROM r WHERE rn = 1`.
+
+4. **PIVOT syntax:**
+   - Supports explicit `PIVOT` operator with an aggregate and explicit value list: `SELECT ... FROM src PIVOT (SUM(amount) FOR status IN ([completed], [cancelled], [refunded])) AS p`.
+   - Column aliases in the IN-list must be quoted with square brackets.
+   - Conditional aggregation (`SUM(CASE WHEN status='completed' THEN amount END)`) is the portable alternative and recommended for maintainability.
+
+5. **SELECT * EXCEPT / REPLACE:**
+   - NOT supported in T-SQL. Explicitly list columns.
+
+6. **Incremental MERGE syntax:**
+   - `MERGE target USING source ON ... WHEN MATCHED AND (hash_differs) THEN UPDATE SET ... WHEN NOT MATCHED THEN INSERT ... WHEN NOT MATCHED BY SOURCE THEN DELETE ...` (supports SCD1 full upsert + soft/hard delete).
+   - Caution: `MERGE` in T-SQL has known race conditions under high concurrency; use `HOLDLOCK` / `SERIALIZABLE` hints or wrap in a transaction for incremental idempotency. For large tables, stage + `UPDATE` + `INSERT` batches often outperform a single MERGE.
+
+### PostgreSQL (including Aurora Postgres, AlloyDB, Redshift with compatibility layer)
+
+1. **String concatenation & NULL propagation:**
+   - `a || b` operator: propagates NULL (NULL input → NULL result) per SQL standard.
+   - `CONCAT(a, b, c)` function: treats NULLs as empty strings (no NULL propagation).
+   - `FORMAT()` or `concat_ws(' ', a, b, c)` for separator-joined, NULL-skipping concatenation.
+
+2. **Date functions:**
+   - `order_date + INTERVAL '7 days'` — ANSI-style interval arithmetic.
+   - `DATE_TRUNC('month', order_date)` — date part is a string literal; returns timestamptz/date truncated to the specified part.
+   - `AGE(end_date, start_date)` — returns an interval type (years-months-days); use `EXTRACT(EPOCH FROM AGE(...))` for seconds if needed.
+   - `NOW()` returns `timestamptz` at UTC+session TZ; `NOW() AT TIME ZONE 'UTC'` for explicit UTC.
+
+3. **QUALIFY row_number filtering:**
+   - NOT supported in core Postgres before PostgreSQL 16. As of PG16, `QUALIFY` is supported. For older versions use CTE/subquery pattern: `WITH r AS (SELECT *, ROW_NUMBER() OVER (...) AS rn) SELECT * FROM r WHERE rn = 1`.
+
+4. **PIVOT syntax:**
+   - No built-in `PIVOT` operator. Use conditional aggregation `SUM(CASE WHEN ... END) FILTER (WHERE status = 'completed')`. The `FILTER` clause (Postgres 9.4+) is more efficient than CASE with NULL-else.
+   - `tablefunc` extension provides `CROSSTAB` for true pivot output; requires explicit type declaration.
+
+5. **SELECT * EXCEPT / REPLACE:**
+   - NOT supported natively. Explicitly list columns.
+
+6. **Incremental MERGE syntax:**
+   - `MERGE INTO target USING source ON ... WHEN MATCHED AND ... THEN UPDATE SET ... WHEN NOT MATCHED THEN INSERT ...` (Postgres 15+).
+   - Pre-Postgres 15: use classic `INSERT ... ON CONFLICT (key) DO UPDATE SET ...` (UPSERT) for SCD1. For delete handling, pair with a separate DELETE using a left-anti-join pattern.
+
+### Snowflake
+
+1. **String concatenation & NULL propagation:**
+   - `a || b` operator: propagates NULL per default. Set `CONCAT_NULL_YIELDS_NULL = FALSE` at session/account level to treat NULLs as empty strings (non-default).
+   - `CONCAT(a, b, c)` function: treats NULLs as empty strings (no NULL propagation); identical to Postgres/SQL Server `CONCAT`.
+   - `CONCAT_WS(sep, a, b, c)` skips NULLs and joins with a separator.
+
+2. **Date functions:**
+   - `DATEADD('day', 7, order_date)` — date part is a string literal.
+   - `DATEDIFF('day', start_date, end_date)` — counts whole boundary crossings.
+   - `DATE_TRUNC('month', order_date)` — standard truncation; returns the first day of the period.
+   - `CURRENT_TIMESTAMP()` returns the wall-clock time; use `CONVERT_TIMEZONE('UTC', ts)` for conversions.
+
+3. **QUALIFY row_number filtering:**
+   - FULLY SUPPORTED. Preferred concise pattern: `SELECT * FROM src QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) = 1`.
+   - Executes after WHERE / GROUP BY / HAVING but before ORDER BY. Commonly used instead of CTE wrapping for dedup and top-N per group.
+
+4. **PIVOT syntax:**
+   - Supports explicit `PIVOT` with aggregate and value list: `SELECT * FROM src PIVOT (SUM(amount) FOR status IN ('completed', 'cancelled', 'refunded'))`.
+   - Also supports `UNPIVOT` for the reverse direction.
+   - Conditional aggregation remains portable; `PIVOT` is convenient for ad-hoc with fixed value lists.
+
+5. **SELECT * EXCEPT / REPLACE:**
+   - FULLY SUPPORTED.
+   - `SELECT * EXCLUDE (rn, hash_col, _loaded_at) FROM ranked` — removes listed columns from the star expansion.
+   - `SELECT * REPLACE (UPPER(name) AS name, COALESCE(email, '') AS email) FROM src` — replaces the expressions of specific columns in the star output.
+   - These are Snowflake-specific; do not use in portable code paths.
+
+6. **Incremental MERGE syntax:**
+   - `MERGE INTO target USING source ON match_key WHEN MATCHED AND source._hash != target._hash THEN UPDATE SET ... WHEN NOT MATCHED THEN INSERT ... WHEN NOT MATCHED BY SOURCE THEN DELETE` — fully-featured and optimized for micro-partition pruning on the join key.
+   - Best practice: cluster both tables by the merge join key to ensure efficient pruning. Use `MATCH BY SOURCE` variants for complex SCD2 logic with explicit row effective dates.
+
+### DuckDB
+
+1. **String concatenation & NULL propagation:**
+   - `a || b` operator: propagates NULL per ANSI standard.
+   - `CONCAT(a, b, c)` function: treats NULLs as empty strings (no NULL propagation).
+   - `CONCAT_WS` also supported.
+
+2. **Date functions:**
+   - `order_date + INTERVAL 7 DAY` or `DATEADD('day', 7, order_date)` — both forms accepted.
+   - `DATE_TRUNC('month', order_date)` — standard truncation.
+   - `CURRENT_TIMESTAMP`, `NOW()` supported.
+
+3. **QUALIFY row_number filtering:**
+   - FULLY SUPPORTED. `SELECT * FROM src QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) = 1`.
+
+4. **PIVOT syntax:**
+   - Supports both `PIVOT` operator and conditional aggregation.
+   - `PIVOT src ON status IN ('completed','cancelled') USING SUM(amount)` — compact syntax with inferred grouping columns.
+
+5. **SELECT * EXCEPT / REPLACE:**
+   - FULLY SUPPORTED.
+   - `SELECT * EXCLUDE (rn, _tmp) FROM ...` (keyword EXCLUDE, not EXCEPT) — removes columns.
+   - `SELECT * REPLACE (UPPER(name) AS name) FROM ...` — replaces specific column expressions.
+   - Note: keyword is `EXCLUDE` not `EXCEPT` (differs from Snowflake).
+
+6. **Incremental MERGE syntax:**
+   - `MERGE INTO target USING source ON match_key WHEN MATCHED THEN UPDATE SET ... WHEN NOT MATCHED THEN INSERT ... WHEN NOT MATCHED BY SOURCE THEN DELETE` — full ANSI-style MERGE with delete branch.
+   - For large local workloads, DuckDB often achieves better throughput with separate `INSERT ... WHERE key NOT IN (SELECT key FROM target)` + `UPDATE` batches due to vectorized execution.
+
+### Spark SQL (Databricks, Delta Lake, Synapse Serverless Spark pools)
+
+1. **String concatenation & NULL propagation:**
+   - `a || b` operator: behavior depends on `spark.sql.legacy.concatNullsInBinaryComparison` config; modern Spark (3.0+) propagates NULL by default.
+   - `CONCAT(a, b, c)` function: propagates NULL (different from most other dialects where CONCAT skips NULLs). For NULL-safe concatenation use `CONCAT_WS('', a, b, c)` which skips NULLs and joins with empty string.
+   - Key difference: Spark `CONCAT` NULL-propagates; all other dialects above treat NULLs as empty strings in `CONCAT()`.
+
+2. **Date functions:**
+   - `DATE_ADD(order_date, 7)` — second arg is integer days.
+   - `ADD_MONTHS(order_date, 3)` for months.
+   - `DATE_TRUNC('month', order_date)` or `TRUNC(order_date, 'MM')` — both work.
+   - `DATEDIFF(end_date, start_date)` — returns days between dates (note reversed arg order vs Snowflake/SQL Server).
+   - `CURRENT_TIMESTAMP()` for session TZ; `FROM_UTC_TIMESTAMP` / `TO_UTC_TIMESTAMP` for conversions.
+
+3. **QUALIFY row_number filtering:**
+   - FULLY SUPPORTED as of Spark 3.2 / Databricks Runtime 10.4 LTS+.
+   - `SELECT * FROM src QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) = 1`.
+   - For older Spark use CTE/subquery pattern.
+
+4. **PIVOT syntax:**
+   - Supports explicit `PIVOT` on DataFrames and SQL: `SELECT * FROM src PIVOT (SUM(amount) FOR status IN ('completed', 'cancelled'))`.
+   - `UNPIVOT` / `STACK()` for the reverse.
+   - Conditional aggregation is portable across all Spark versions.
+
+5. **SELECT * EXCEPT / REPLACE:**
+   - NOT supported directly. Databricks SQL supports star with column drops via `SELECT * EXCEPT(col1, col2)` on some recent runtimes; verify version. Portable fallback: explicitly list columns.
+
+6. **Incremental MERGE syntax:**
+   - Delta Lake MERGE: `MERGE INTO target USING source ON key WHEN MATCHED AND _hash_changed THEN UPDATE SET * WHEN NOT MATCHED THEN INSERT * WHEN NOT MATCHED BY SOURCE THEN DELETE`.
+   - Supports SCD2 with `WHEN MATCHED AND current_flag = 1 THEN UPDATE SET current_flag = 0` + separate `WHEN NOT MATCHED THEN INSERT` pattern, or use Delta Lake `SCD TYPE 2` operation in Delta Live Tables.
+   - Optimize by partitioning and Z-ordering both tables on the merge key; Delta Lake auto-skips unaffected files via data skipping.
+
+---
+
 ## How to Test SQL
 
 1. **Unit-test logic with known inputs** — Build test fixtures (CTEs with VALUES) and assert expected outputs.
@@ -328,10 +482,15 @@ WHEN NOT MATCHED THEN INSERT (customer_bk, name, email, country, created_at, upd
 
 ## Indexes & Query Plans
 
-- **OLTP indexes** (Postgres, SQL Server): B-tree on high-selectivity JOIN/WHERE columns; covering indexes include projected columns → avoid bookmark lookups.
-- **OLAP warehouses** (Snowflake, BigQuery): Do *not* create traditional indexes. Use **clustering / sort keys / partitioning** (e.g., Snowflake `CLUSTER BY (date, country)`) for zone-map pruning.
-- **DuckDB**: ART (Adaptive Radix Tree) indexes for point lookups on FK/PK; auto-created for PK.
-- **Spark / Delta Lake**: Z-order by commonly filtered columns; partition by low-cardinality date columns.
-- **Reading a plan**: Work from the *innermost* (leaves) node *outward*. Seek > Index Seek > Scan. A Nested Loop with a Scan inside it on a large table is almost always a bug.
+**Performance heuristics — always check execution plan, then consider.**
+
+- **OLTP systems** (Postgres, SQL Server): Check actual execution plan first. If the plan shows repeated table lookups on a high-selectivity access pattern, consider a B-tree on high-selectivity JOIN/WHERE columns. Consider covering indexes that include projected columns to avoid bookmark lookups when the plan shows lookups are the bottleneck.
+- **OLAP warehouses** (Snowflake, BigQuery): Traditional indexes are typically not supported or beneficial. Check the query profile for partition/clustering pruning misses. Consider **clustering / sort keys / partitioning** (e.g., Snowflake `CLUSTER BY (date, country)`) for zone-map pruning when the profile shows full-table scans on filters that could prune.
+- **DuckDB**: ART (Adaptive Radix Tree) indexes help point lookups on FK/PK columns; auto-created for PK. Check the plan before adding secondary indexes.
+- **Spark / Delta Lake**: If the query profile shows poor data skipping, consider Z-order by commonly filtered columns and partition by low-cardinality date columns.
+- **Reading a plan**: Work from the *innermost* (leaves) node *outward*. Estimate vs actual row mismatches of >10× indicate stale statistics. A Nested Loop with a Sequential Scan inside it on a large table is a common sign of a missing join predicate or missing index — verify against the actual plan before acting.
+- **FK column indexes**: On OLTP systems, check the plan for join performance. If FK joins are the bottleneck (nested-loop scans without index), consider indexing FK columns. **Performance heuristic, not a hard rule.**
+
+**Hard correctness rule (NULLs in outer join key semantics):** When a column participates in an OUTER JOIN, the engine's treatment of NULL join keys is consistent (NULLs do not match NULLs in standard SQL), but the result can be surprising. For OUTER JOINs, verify that: (1) NULL-extended rows from the preserved side are not accidentally filtered in WHERE, and (2) join keys that include NULLs are handled explicitly (IS NOT DISTINCT FROM or NULL-safe equality operator) if NULL-matching is intended.
 
 ---

@@ -1,5 +1,32 @@
 # Statistics Reference Guide (Analytics Engineering)
 
+## Core concepts: Six distinctions that prevent most misuse
+
+Before running any test, define which of these you are actually doing. They are not interchangeable; confusing them produces wrong decisions.
+
+| Concept | Meaning | What to report | Common error |
+|---------|---------|----------------|--------------|
+| **Statistical significance** | The probability of observing the data (or more extreme) under the null hypothesis is low (e.g., p < α). Answers: *"Is this pattern unlikely to be random noise?"* | p-value, α-level, test statistic, power. | Treating a small p as evidence of a *large* or *meaningful* effect. |
+| **Practical / business significance** | The magnitude of the effect is large enough to matter for a decision. Answers: *"Even if real, does this change a business outcome materially?"* | Absolute Δ, relative Δ%, cost/benefit, ROI, minimum effect size of interest (SESOI). | Skipping this entirely and using p < 0.05 as the decision criterion. |
+| **Correlation** | Two variables move together (monotonically or linearly) in a sample. Measures *association*, nothing more. | Correlation coefficient (Pearson r / Spearman ρ), scatter plot, range of X observed. | Interpreting correlation as causation. |
+| **Causation** | Changing X would change Y in a specified intervention. Requires: temporal order, association, and elimination of alternative explanations via design (RCT, DiD, RDD, IV, matching). | Estimated treatment effect (ATE/ATT), identification strategy, robustness checks, causal DAG showing assumptions. | Inferring from observational data without a causal identification argument. |
+| **Prediction** | Given X (known today), guess Y (unknown in future). Optimizes *out-of-sample accuracy*, not parameter interpretability. | OOS RMSE/MAE/AUC on holdout set, calibration, calibration plot, temporal split not random split. | Interpreting coefficients of a predictive model as causal effects. |
+| **Inference / estimation** | Quantifying the value and uncertainty of a *parameter* (e.g., treatment effect, elasticity, population mean). Optimizes *validity of the uncertainty statement*. | Point estimate, 95% CI, standard error, identification assumption, robustness to model form. | Reporting a point estimate with no CI and no assumption statement. |
+
+**Critical caution — HARD RULE FOR DECISIONS:** A p-value below 0.05 alone never justifies a business decision. Always report together:
+1. Effect size (absolute and relative)
+2. Confidence / credible intervals
+3. Practical impact ($ or user count or KPI change scaled to full population)
+4. Slice-level consistency (does the effect appear in every subgroup, or only one?)
+
+**Progression — when to advance to the next stage only if value is justified:**
+1. **Descriptive** (totals, slices, distributions) — always start here. Lowest cost.
+2. **Diagnostic** (driver decompositions, why did this change?) — add only if the descriptive finding is material.
+3. **Statistical** (hypothesis tests, uncertainty quantification) — add only if the diagnostic suggests a decision where noise matters; always review leakage (did training/periodization accidentally use future data?).
+4. **Predictive** (forecasts, scoring models, ML) — add only if the statistical stage confirms there is a real, stable signal to learn; re-review leakage (temporal split, feature availability at prediction time).
+
+Advancing to a more complex stage without confirming value at the current stage is over-engineering.
+
 ## When Used
 Statistics is the **mathematics of uncertainty**. Apply statistical methods in analytics when you need to:
 - Draw **reliable conclusions from samples** rather than full populations (surveys, A/B tests, sensor sub-samples)
@@ -23,16 +50,20 @@ Statistics is the **mathematics of uncertainty**. Apply statistical methods in a
 ## Common Mistakes
 
 1. **Confusing statistical significance with practical (business) significance.** A tiny p-value (p<0.0001) with an effect size of €0.03 per user means nothing for the business; report both p and effect.
-2. **p-hacking / multiple comparisons without correction.** Running 20 tests at α=0.05 guarantees, on average, **1 false positive**. Use Bonferroni correction (α/n), Šidák, FDR (Benjamini-Hochberg) or Bayesian methods.
-3. **Confusing correlation (r) with causation.** `ice_cream_sales` ↑ is correlated with `drowning_deaths` ↑; both are driven by temperature (confounder). No amount of r fixes this.
+2. **p-hacking / multiple comparisons without correction.** Running 20 tests at α=0.05 guarantees, on average, **1 false positive**. This includes: testing 20 different subgroups, 5 different outcome variables, 4 different exclusion windows, or 2 model specifications (5×4 = 20 total tests). **Correction is mandatory any time the number of hypotheses tested exceeds 1:**
+   - **Bonferroni** (α/n): strict family-wise error rate (FWER) control when false positives are costly. Simple, conservative.
+   - **Benjamini-Hochberg FDR (fdr_bh):** preferred for exploratory work with many hypotheses (e.g., 100 segments, 50 metrics). Controls the *proportion* of false positives among rejected hypotheses, not the absolute probability of any.
+   - Always report the raw number of hypotheses tested and the correction method applied. Never report only the "significant" results without the denominator.
+3. **Confusing correlation (r) with causation.** `ice_cream_sales` ↑ is correlated with `drowning_deaths` ↑; both are driven by temperature (confounder). No amount of r fixes this. A causal claim requires a causal identification argument (RCT, DiD, RDD, IV, matching, DAG with front/backdoor adjustment).
 4. **Reporting a mean without dispersion.** "Average order value is €78" — is this €78 ± €2 or €78 ± €400? Always include SD/IQR/quantiles.
 5. **Using mean on heavily skewed data.** Revenue per customer is heavily right-skewed (most spend €10, one spends €1M). Mean is pulled to €78 while median is €32 → **misleading reporting**. Use median + IQR or log-transform.
 6. **Confidence interval interpreted as "there is a 95% probability the true mean lies in this interval."** Frequentist CIs are not Bayesian credible intervals; correct interpretation: "If we repeated this experiment infinitely, 95% of the intervals constructed this way would contain the true parameter."
 7. **Confusing p-value with the probability H0 is true.** p=0.04 does NOT mean "4% chance H0 is true." p=P(data or more extreme | H0 true). Not P(H0|data).
 8. **Using parametric tests (t-test, ANOVA) when assumptions are violated** (normality, homoscedasticity, independence). → Use non-parametric (Wilcoxon, Kruskal-Wallis, permutation) or bootstrap.
-9. **Simpson's paradox ignored:** A treatment appears beneficial overall, but harmful in every subgroup (due to a confounding variable). Disaggregate before concluding.
-10. **Using linear regression on non-stationary time-series** → spurious correlation (GDP vs number of PhDs both trend upward over time → high r², meaningless relationship).
-11. **Accepting the null hypothesis.** "p > 0.05, so there is no effect" is wrong. Correct: "We failed to reject H0 at this alpha; may be due to low power."
+9. **Simpson's paradox ignored.** A treatment appears beneficial overall but harmful in *every* subgroup because a confounding variable is correlated with both treatment selection AND outcome. **Always disaggregate before concluding** and draw a DAG with domain experts to identify confounders.
+   - Short example: Drug is given to 800 sick patients (400 severe, 400 mild). Severe patients are *more likely* to receive the drug AND *more likely* to die. Overall: 400 treated → 200 die (50%); 400 untreated → 160 die (40%) → drug looks worse. But within each severity stratum: mild-treated 200 → 10 die (5%), mild-untreated 200 → 20 die (10%); severe-treated 200 → 190 die (95%), severe-untreated 200 → 140 die (70%). Wait — no: classic Simpson flips BOTH subgroups. Correct classical example: mild + severe combined with *different treatment rates per stratum* causes the reversal. Always condition on the confounder before concluding effect direction.
+10. **Using linear regression on non-stationary time-series** → spurious correlation (GDP vs number of PhDs both trend upward over time → high r², meaningless relationship). Difference or use SARIMA/Prophet.
+11. **Accepting the null hypothesis.** "p > 0.05, so there is no effect" is wrong. Correct: "We failed to reject H0 at this alpha; may be due to low power." Run post-hoc power analysis and report the minimum detectable effect.
 12. **Outliers dropped arbitrarily.** If an outlier is a genuine data point (not data entry error), it represents real information. Use robust methods (median, quantile regression) instead of deletion.
 
 ---

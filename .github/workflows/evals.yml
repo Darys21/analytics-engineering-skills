@@ -1,0 +1,146 @@
+name: Evaluations Schema & Dry-Run
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  evals-schema:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate evals.json schema (stdlib inline)
+        run: |
+          python - <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          EVALS_PATH = Path("evals/evals.json")
+          REQUIRED_FIELDS = {
+              "id",
+              "title",
+              "difficulty",
+              "type",
+              "input",
+              "expected_workflow_routing",
+              "expected_behaviors",
+              "expected_not",
+          }
+          LIST_FIELDS = {
+              "expected_workflow_routing",
+              "expected_behaviors",
+              "expected_not",
+          }
+          VALID_DIFFICULTY = {"low", "medium", "high"}
+          VALID_TYPE = {"positive", "negative_near_miss", "negative", "boundary"}
+
+          if not EVALS_PATH.is_file():
+              print(f"ERROR: {EVALS_PATH} not found")
+              sys.exit(1)
+
+          try:
+              with EVALS_PATH.open("r", encoding="utf-8") as f:
+                  data = json.load(f)
+          except json.JSONDecodeError as e:
+              print(f"ERROR: invalid JSON in {EVALS_PATH}: {e}")
+              sys.exit(1)
+
+          if not isinstance(data, dict):
+              print("ERROR: top-level JSON must be an object")
+              sys.exit(1)
+
+          cases = data.get("cases")
+          if cases is None:
+              print("ERROR: top-level key 'cases' missing")
+              sys.exit(1)
+          if not isinstance(cases, list):
+              print(f"ERROR: 'cases' must be a list, got {type(cases).__name__}")
+              sys.exit(1)
+          if len(cases) == 0:
+              print("ERROR: 'cases' list is empty")
+              sys.exit(1)
+
+          errors = []
+          for idx, case in enumerate(cases):
+              if not isinstance(case, dict):
+                  errors.append(f"case #{idx}: not an object")
+                  continue
+
+              case_id = case.get("id", f"#{idx}")
+              missing = REQUIRED_FIELDS - set(case.keys())
+              if missing:
+                  errors.append(
+                      f"case {case_id}: missing required fields: {sorted(missing)}"
+                  )
+
+              for field in LIST_FIELDS:
+                  if field in case and not isinstance(case[field], list):
+                      errors.append(
+                          f"case {case_id}: field '{field}' must be a list, "
+                          f"got {type(case[field]).__name__}"
+                      )
+
+              if "difficulty" in case and case["difficulty"] not in VALID_DIFFICULTY:
+                  errors.append(
+                      f"case {case_id}: 'difficulty' value {case['difficulty']!r} "
+                      f"not in {sorted(VALID_DIFFICULTY)}"
+                  )
+
+              if "type" in case and case["type"] not in VALID_TYPE:
+                  errors.append(
+                      f"case {case_id}: 'type' value {case['type']!r} "
+                      f"not in {sorted(VALID_TYPE)}"
+                  )
+
+              for str_field in ("id", "title", "input"):
+                  if str_field in case and not isinstance(case[str_field], str):
+                      errors.append(
+                          f"case {case_id}: field '{str_field}' must be string, "
+                          f"got {type(case[str_field]).__name__}"
+                      )
+
+              if "references_loaded" in case:
+                  if not isinstance(case["references_loaded"], list):
+                      errors.append(
+                          f"case {case_id}: 'references_loaded' must be a list "
+                          f"when present, got {type(case['references_loaded']).__name__}"
+                      )
+                  elif not all(isinstance(x, str) for x in case["references_loaded"]):
+                      errors.append(
+                          f"case {case_id}: every entry in 'references_loaded' "
+                          f"must be a string"
+                      )
+
+          type_counts = {}
+          diff_counts = {}
+          for case in cases:
+              t = case.get("type", "unknown")
+              d = case.get("difficulty", "unknown")
+              type_counts[t] = type_counts.get(t, 0) + 1
+              diff_counts[d] = diff_counts.get(d, 0) + 1
+
+          print(f"SUMMARY: {len(cases)} total cases")
+          print(f"  by type       : {type_counts}")
+          print(f"  by difficulty : {diff_counts}")
+
+          if errors:
+              print("")
+              print(f"FAILED: {len(errors)} schema issue(s) found:")
+              for e in errors:
+                  print(f"  - {e}")
+              sys.exit(1)
+
+          print("")
+          print("OK: all cases pass schema validation")
+          sys.exit(0)
+          PY

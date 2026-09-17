@@ -1,0 +1,66 @@
+name: Validate Repository
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies (none — validators use stdlib only)
+        run: |
+          echo "No dependencies required. All validators use Python stdlib."
+          python --version
+
+      - name: Run validate_project.py --strict
+        run: python scripts/validate_project.py --strict
+
+      - name: Validate evals.json syntax (JSON well-formed)
+        run: python -m json.tool evals/evals.json > /dev/null
+
+      - name: Dry-run validate_sql.py (no crash; ignore warnings)
+        run: |
+          set +e
+          python scripts/validate_sql.py scripts
+          set -e
+          echo "sql validator dry-run ok"
+
+      - name: Dry-run validate_dax.py (no crash)
+        run: |
+          set +e
+          python scripts/validate_dax.py scripts
+          set -e
+          echo "dax validator dry-run ok"
+
+      - name: Dry-run validate_tmdl.py (no crash)
+        run: |
+          set +e
+          python scripts/validate_tmdl.py scripts
+          set -e
+          echo "tmdl validator dry-run ok"
+
+      - name: Syntax-check every Python script via --help (exit 0 required)
+        run: |
+          rc=0
+          for script in scripts/*.py; do
+            echo "--- checking: $script --help"
+            python "$script" --help > /dev/null
+            script_rc=$?
+            if [ $script_rc -ne 0 ]; then
+              echo "ERROR: $script --help exited $script_rc"
+              rc=1
+            fi
+          done
+          exit $rc

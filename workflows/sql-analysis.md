@@ -27,6 +27,18 @@ Produce correct SQL that is readable by teammates, modular via CTEs and staged q
 
 ## Procedure
 
+0. **Identify the SQL dialect before writing or optimizing; note any dialect-specific behavior.**
+   1. Record the target platform and version: T-SQL (SQL Server 2019 / Azure SQL / Synapse), PostgreSQL (13 / 14 / 15 / Aurora), Snowflake, DuckDB, Spark SQL / Databricks, BigQuery, Redshift, or other.
+   2. Confirm behavior differences that affect this query BEFORE writing:
+      - String concatenation: does `||` or `CONCAT` propagate NULL? (See `references/sql.md` → Dialect Specific Notes.)
+      - Date arithmetic: does `DATEADD` exist, or is it `+ INTERVAL` / `DATE_ADD`? Does `DATE_TRUNC` use keyword date-part or string date-part?
+      - Can `QUALIFY ROW_NUMBER() = 1` be used, or must window functions be wrapped in CTE/subquery?
+      - Is `SELECT * EXCEPT/EXCLUDE` available? Or must columns be enumerated explicitly?
+      - Incremental merge: does the dialect support MERGE with `NOT MATCHED BY SOURCE`? Are there race conditions or concurrency hints required?
+      - PIVOT operator availability vs. conditional aggregation.
+   3. If the query must be portable across dialects, list the portable form (e.g., conditional aggregation, not PIVOT; CTE window + WHERE, not QUALIFY) and the dialect-specific optimized form.
+   4. Record the dialect decision in the header comment (step 1) so future readers do not assume ANSI behavior in dialect-specific constructs.
+
 1. **State the question and expected output grain explicitly in a comment header.**
    1. At the top of every SQL file, write a block comment with:
       - **Purpose:** One sentence describing what the query computes.

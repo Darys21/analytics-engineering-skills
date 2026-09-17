@@ -1,6 +1,25 @@
 {
-  "version": "1.0",
+  "schema_version": "2.0",
+  "format": "custom-internal-behavioral",
+  "format_note": "Repository-native schema. Not claimed to be Anthropic-compatible or any vendor format. Adapt via adapter if needed.",
   "description": "Evaluation cases for the Analytics Engineering Skills Repository. Each case asserts expected workflow routing and behavior, and explicitly flags unwanted actions (over-engineering, pointless questions, jumping to solutions). Cases cover both positive (correct) routing and negative (near-miss or anti-pattern) prompts to test restraint.",
+  "schema": {
+    "case_required_fields": [
+      "id",
+      "title",
+      "difficulty",
+      "type",
+      "input",
+      "expected_workflow_routing",
+      "expected_behaviors",
+      "expected_not",
+      "references_loaded"
+    ],
+    "types_explained": {
+      "positive": "expects correct behavior to occur",
+      "negative_near_miss": "tests restraint against anti-patterns"
+    }
+  },
   "cases": [
     {
       "id": "eval-001",
@@ -295,6 +314,185 @@
         "Does not forget to recommend rotation for a secret that has already leaked."
       ],
       "references_loaded": ["references/security.md", "workflows/delivery.md", "references/ci-cd.md"]
+    },
+    {
+      "id": "eval-016",
+      "title": "Over-questioning restraint — fully specified request",
+      "difficulty": "low",
+      "type": "negative_near_miss",
+      "input": "Give me daily revenue, all regions, QoQ comparison, grain = day. I have a gold mart called mart_sales_gold with dim_date, dim_region, revenue_amount columns. Start with the SQL query.",
+      "expected_workflow_routing": ["sql-analysis", "business-analysis"],
+      "expected_behaviors": [
+        "Proceeds directly to writing or validating the query; does not ask redundant questions that are already answered.",
+        "Confirms only genuinely missing, non-obvious information that materially changes the work (e.g., fiscal vs calendar QoQ definition if ambiguous).",
+        "Produces the SQL or DAX promptly based on the specified grain, KPI, region scope, and timeframe.",
+        "Explicitly notes any minimal assumptions made (e.g., 'assuming calendar quarters; confirm if fiscal differs') without stalling."
+      ],
+      "expected_not": [
+        "Does not ask redundant questions whose answers were already given in the prompt (grain, kpi, region, timeframe are all specified).",
+        "Does not grill endlessly about persona, business question, etc., when the user has already scoped the work narrowly and explicitly.",
+        "Does not say 'I need more context' without specifying exactly what is still ambiguous and why it matters."
+      ],
+      "references_loaded": ["workflows/sql-analysis.md", "workflows/grill.md"]
+    },
+    {
+      "id": "eval-017",
+      "title": "Under-questioning — zero-context build dashboard",
+      "difficulty": "low",
+      "type": "negative_near_miss",
+      "input": "Build dashboard.",
+      "expected_workflow_routing": ["grill", "business-analysis"],
+      "expected_behaviors": [
+        "Does NOT proceed to build anything. Asks the minimum set of high-value clarification questions: business decision to be supported, target persona/audience, KPIs to display, required grain and dimensions, acceptable timeframe/freshness, data source access, and success criteria.",
+        "Prioritizes questions by information value — asks the 5–8 questions that most reduce uncertainty first, not a 50-item laundry list.",
+        "Explicitly states the decision problem the dashboard will answer before proposing tools or visuals."
+      ],
+      "expected_not": [
+        "Does not immediately write a star schema, open Power BI, or produce mockups of charts.",
+        "Does not assume default KPIs ('total sales, orders, customers') without asking and call that 'done'.",
+        "Does not skip clarification because the request is short."
+      ],
+      "references_loaded": ["workflows/grill.md", "workflows/business-analysis.md"]
+    },
+    {
+      "id": "eval-018",
+      "title": "Over-engineering restraint — small CSV monthly totals",
+      "difficulty": "low",
+      "type": "negative_near_miss",
+      "input": "I have one CSV file of 4,000 sales transactions with columns date, product, amount, qty. Compute monthly totals for each product and show top 5 products per month.",
+      "expected_workflow_routing": ["python-analysis"],
+      "expected_behaviors": [
+        "Uses the simplest tool that solves the problem: pandas groupby or even a Python/CSV standard library one-liner, or equivalent SQL if the user has a DB.",
+        "Produces a short, readable script with an explicit 1–2 line comment block describing purpose and grain.",
+        "If deliverable is a report, suggests CSV or Markdown table or a simple visualization if appropriate.",
+        "Verifies output with a quick control total (sum of all monthly totals = sum of source)."
+      ],
+      "expected_not": [
+        "Does not propose or implement Airflow, dbt, Spark, Data Lake, ML pipeline, Docker container, CI, or database for this single 4,000-row CSV task.",
+        "Does not introduce a scheduler, orchestrator, warehouse, or framework unless the user explicitly says this will grow into a production job. Even then, explicitly flags scope expansion.",
+        "Does not write a 500-line OOP framework for a one-off 3-operation computation."
+      ],
+      "references_loaded": ["workflows/python-analysis.md", "references/python.md"]
+    },
+    {
+      "id": "eval-019",
+      "title": "DAX false positive — CALCULATE context transition intentional",
+      "difficulty": "medium",
+      "type": "negative_near_miss",
+      "input": "Review this DAX measure: CALCULATE(SUMX(VALUES(Date[Year]), [Total Sales])). The validator flagged CALCULATE as wrong. Is this correct?",
+      "expected_workflow_routing": ["dax-analysis", "review"],
+      "expected_behaviors": [
+        "Explains that CALCULATE inside SUMX is performing a context transition: the row context from each VALUES(Date[Year]) row is converted into filter context so that [Total Sales] (a measure that requires filter context) computes correctly for each year.",
+        "States clearly that validator heuristics are warnings only and require human review. This particular pattern is a canonical correct use of CALCULATE and NOT a bug.",
+        "Explains when CALCULATE wrapping SUM CAN be a potential simplification (standalone measure with no row context and no filter modifiers) and contrasts it with this case.",
+        "Either (a) confirms the measure as semantically correct with justification, or (b) proposes alternative formulations only with evidence they are strictly equivalent and better."
+      ],
+      "expected_not": [
+        "Does not label the CALCULATE here as definitely wrong or instruct to remove it without semantic analysis.",
+        "Does not treat validator warnings as ground truth; explicitly notes regex validators cannot determine semantics.",
+        "Does not say 'remove CALCULATE, it is always redundant' or any absolute statement."
+      ],
+      "references_loaded": ["references/dax.md", "workflows/dax-analysis.md", "scripts/validate_dax.py"]
+    },
+    {
+      "id": "eval-020",
+      "title": "SQL dialects — Snowflake QUALIFY not globally invalid",
+      "difficulty": "medium",
+      "type": "negative_near_miss",
+      "input": "Review this Snowflake query snippet: SELECT * FROM src_orders QUALIFY ROW_NUMBER() OVER (PARTITION BY order_id ORDER BY updated_at DESC) = 1. Flag any issues.",
+      "expected_workflow_routing": ["sql-analysis", "review"],
+      "expected_behaviors": [
+        "Explicitly identifies the dialect: Snowflake.",
+        "States that QUALIFY is fully supported in Snowflake (and DuckDB, Databricks, Spark 3.2+, Postgres 16+, etc.) and is a valid, idiomatic, preferred way to filter window function results in Snowflake.",
+        "Notes that QUALIFY is NOT universal (absent in T-SQL, older Postgres, older Spark versions) and would need CTE/subquery wrapping if ported to those dialects.",
+        "Only flags issues that are actually problems in the Snowflake dialect (e.g., non-deterministic tiebreakers in ROW_NUMBER ORDER BY if no unique second sort key)."
+      ],
+      "expected_not": [
+        "Does NOT label QUALIFY syntax as universally invalid, a SQL error, or an anti-pattern based on a different dialect's behavior.",
+        "Does not unconditionally suggest rewriting to a CTE + WHERE wrapper in Snowflake. May mention the portable form as a dialect portability note only, not a correctness fix.",
+        "Does not confuse ANSI SQL behavior with T-SQL / dialect-specific rules."
+      ],
+      "references_loaded": ["references/sql.md", "workflows/sql-analysis.md"]
+    },
+    {
+      "id": "eval-021",
+      "title": "Business-first reasoning — sales dashboard before visuals",
+      "difficulty": "medium",
+      "type": "positive",
+      "input": "Design a sales dashboard for the business.",
+      "expected_workflow_routing": ["grill", "business-analysis", "dashboard-ux", "visualization"],
+      "expected_behaviors": [
+        "Stage 1 — Grill & business question: Asks about persona (CFO? Reps? Ops?), decision to be supported each time the viewer opens it (e.g., 'Should we reallocate marketing budget to a channel?'), KPIs that drive that decision, required timeframes and slices, and SLA for freshness.",
+        "Stage 2 — KPI & metric definition: Produces a metric contract listing each KPI with grain, formula, data source, and reconciliation reference.",
+        "Stage 3 — UX hierarchy and visual selection: Maps Context → KPI tile → Diagnosis view (driver breakdown, segments) → Detail drill → Action items, THEN proposes visual encodings (bar, line, scatter) that match each question.",
+        "Stage 4 — Tool/stack proposal: Only AFTER business stage and UX stage, proposes the tool stack and layout."
+      ],
+      "expected_not": [
+        "Does NOT jump first to Power BI mockups, chart types, color themes, or visualization without understanding the business question, persona, and KPIs.",
+        "Does not start with a list of visuals ('KPI card for revenue, line chart, map, top 10 table') without tying each to the specific decision the dashboard supports.",
+        "Does not assume default KPIs ('sales, orders, AOV') without confirming them against the actual decision problem."
+      ],
+      "references_loaded": ["workflows/grill.md", "workflows/business-analysis.md", "workflows/dashboard-ux.md", "workflows/visualization.md"]
+    },
+    {
+      "id": "eval-022",
+      "title": "Data quality — two-source equivalence by field name alone",
+      "difficulty": "high",
+      "type": "negative_near_miss",
+      "input": "Compare ERP revenue vs CRM revenue. Both systems have a column named 'revenue'. Do these match?",
+      "expected_workflow_routing": ["data-quality", "grill", "data-discovery"],
+      "expected_behaviors": [
+        "Does NOT assume the two 'revenue' columns are the same metric just because they share a column name.",
+        "Independently defines the semantic contract for each source before comparing: grain per source (invoice line? posted invoice? recognized? opportunity?), status filter (booked/shipped/invoiced/paid — what is included/excluded in each system?), timing & cutoffs (order date, ship date, invoice date, reporting date — timezones, end-of-month cutoff), dimensional alignment (currency, returns/credits, taxes, discounts, intercompany eliminations, write-offs, partial payments), and source-of-truth rules for each dimension.",
+        "Produces a reconciliation matrix: grand total per source, per-day delta, per-status delta, per-currency delta, and rows that exist in one but not the other with quantified $ impact.",
+        "Concludes with explicit source-of-truth rules and a remapping, NOT a yes/no match."
+      ],
+      "expected_not": [
+        "Does NOT write a simple join WHERE ERP.revenue = CRM.revenue and report match/mismatch by column name alone without any grain/status/timing/dimension check.",
+        "Does NOT say '97% match' without quantifying the $ delta per driver or explaining the 3% difference causes.",
+        "Does NOT pick ERP or CRM as 'the correct one' by default without explicit business agreement on definitions."
+      ],
+      "references_loaded": ["workflows/data-quality.md", "workflows/data-discovery.md", "references/data-quality.md"]
+    },
+    {
+      "id": "eval-023",
+      "title": "Production pipeline design — failure and operational scenarios",
+      "difficulty": "high",
+      "type": "positive",
+      "input": "Design the daily incremental pipeline for gold_mart_kpis running at 05:00 UTC. Think through failure modes.",
+      "expected_workflow_routing": ["pipeline", "analytics-engineering", "observability", "data-quality"],
+      "expected_behaviors": [
+        "Covers happy path: bronze ingestion → silver cleaning + dedupe → gold aggregation → semantic model refresh → atomic swap publish.",
+        "Explicit failure and operational scenarios, EACH with a concrete design pattern: (1) Transient failure / retry: exponential backoff with jitter, max-retries, dead-letter, and alert threshold after N retries. (2) Backfill / re-run window: idempotent window-parameterized steps so 'rerun 2025-01-15..2025-01-20' is a single supported operation with no manual state edits, and downstream recomputes correctly. (3) Late-arriving data: watermark + lookback window config, alert when data arrives beyond the lookback, re-publish the affected past slices correctly (not overwrite today-only). (4) Partial failures: publish-atomicity per partition so a step failure on region=FR does not break region=DE that succeeded, and the consumer sees either old FR + new DE or all-new after a controlled retry, never half-loaded. (5) Schema change / type drift: explicit schema contract per step, both reject-on-drift mode and compatible-auto-evolve mode, and DQ tests that alert on type drift BEFORE the mart is built. (6) Silent wrong data: automated row-count anomaly detector per step (±N% vs rolling window), golden KPI reconciliation against the source total at gold layer, and schema/value-distribution hashing that alerts when the distribution shape shifts significantly even if the total matches.",
+        "Includes alert routing: failure to on-call, freshness SLO breach to ops, DQ failure to analytics engineer, silent-shape drift to data owner.",
+        "Explicitly designs rollback: every published target has versioned snapshots (e.g., table clones, zero-copy time-travel) so a bad deploy can roll back in < 60 seconds."
+      ],
+      "expected_not": [
+        "Does NOT list only the happy-path steps and stop. Does NOT omit the six explicit failure/operational scenarios.",
+        "Does NOT use 'monitoring' as a vague catch-all; must specify what is monitored, the thresholds, and the alert destination per scenario.",
+        "Does NOT assume retries always work; must have dead-letter and escalation after retries are exhausted."
+      ],
+      "references_loaded": ["workflows/pipeline.md", "references/observability.md", "references/analytics-engineering.md", "workflows/data-quality.md"]
+    },
+    {
+      "id": "eval-024",
+      "title": "Context isolation — company Acme must not leak into templates",
+      "difficulty": "medium",
+      "type": "negative_near_miss",
+      "input": "We work at company Acme, a widget manufacturing business with factories in France and Germany. Set up the project structure and context file for our analytics work.",
+      "expected_workflow_routing": ["analytics-engineering", "delivery"],
+      "expected_behaviors": [
+        "Populates templates/CONTEXT.md (or equivalent project context file) with the specific Acme details: company name, industry (widget manufacturing), locations (FR/DE factories), known domains, stakeholders, systems, and any other context the user provided.",
+        "Leaves all other generic repository templates (ADR.md, business-question.md, analysis-report.md, data-contract.yml, definition-of-done.md, project-structure.md, workflow files, reference files, skill files) unchanged as generic templates. They are NOT edited to include 'Acme' or widget-specific defaults.",
+        "Creates a clear separation: (a) project-specific instance context (CONTEXT.md or per-project config) holds Acme-specific info, (b) reusable cross-project templates and repository reference/skills/workflows remain generic.",
+        "If a project-specific ADR or document is needed for Acme, it is written as a new instance file in the specific project directory, not by mutating the repository's generic template file."
+      ],
+      "expected_not": [
+        "Does NOT modify templates/CONTEXT.md (the generic template) or any other generic template/reference/workflow files to hardcode 'Acme' or 'widget' or 'France' or 'Germany' as default values. The template skeleton remains reusable for other clients/companies.",
+        "Does NOT write 'Acme Widget Co.' into the header of every template, into reference files like references/sql.md or references/dax.md, or into workflow procedure steps. Those files stay client-agnostic.",
+        "Does NOT hardcode 'France' and 'Germany' as defaults in any generic template."
+      ],
+      "references_loaded": ["templates/CONTEXT.md", "templates/project-structure.md", "workflows/analytics-engineering.md", "workflows/delivery.md"]
     }
   ]
 }

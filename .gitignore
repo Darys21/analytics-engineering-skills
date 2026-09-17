@@ -8,6 +8,11 @@
 Mega Prompt*.md
 Mega*Prompt*.md
 
+# V0.2 Audit & Remediation Prompt (local source doc, private, should NOT be published)
+Analytics Engineering Skills*.md
+Analytics*V0.2*.md
+Analytics Engineering Skills — V0.2 Audit & Remediation Prompt*.md
+
 # Local project context (private per-project, not part of the generic skill)
 CONTEXT.local.md
 .project-context.md

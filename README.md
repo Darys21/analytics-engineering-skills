@@ -10,6 +10,10 @@ can produce trustworthy, reviewable results.
 > to any modern warehouse stack (SQL, DAX / Power BI, TMDL, CSV / Parquet data
 > pipelines).
 
+## 🚀 How to use this skill
+
+Read the end-to-end practical guide at [docs/how-to-use.md](docs/how-to-use.md) for installation, activation, typical prompts, routing, validation, contributing, and troubleshooting.
+
 ## Project Context
 
 An Analytics Engineer spends most of their time moving *data* into *information*
@@ -71,10 +75,11 @@ git clone https://github.com/Darys21/analytics-engineering-skills.git
 cd analytics-engineer-agent-skills
 
 # 2. (Optional) create a virtual environment.
-python -m venv .venv
-# Windows:
+# Windows (py launcher):
+py -m venv .venv
 .venv\Scripts\activate
 # Unix:
+# python3 -m venv .venv
 # source .venv/bin/activate
 
 # 3. Install optional data-quality dependencies.
@@ -84,14 +89,14 @@ pip install pandas pyarrow
 ### Verify Activation
 
 ```bash
-# 1. Validate the repo itself.
-python scripts/validate_project.py --repo . --verbose
+# 1. Validate the repo itself (Windows: py launcher; Unix: python3).
+py scripts/validate_project.py --repo . --verbose
 
 # 2. Validate a sample SQL file (use your own .sql file).
-python scripts/validate_sql.py path/to/model.sql
+py scripts/validate_sql.py path/to/model.sql
 
 # 3. Profile a CSV.
-python scripts/quality_check.py data/raw/sales.csv --json
+py scripts/quality_check.py data/raw/sales.csv --json
 ```
 
 All scripts exit **0 on success**, **non-zero on errors**, and support `--help`.
@@ -103,25 +108,25 @@ Pick the smallest unit of work that matches your task.
 ### 1. Validate a SQL model before review
 
 ```bash
-python scripts/validate_sql.py models/sales/sales_fact.sql --strict
+py scripts/validate_sql.py models/sales/sales_fact.sql --strict
 ```
 
 ### 2. Audit DAX measures extracted from a Power BI `.bim` export
 
 ```bash
-python scripts/validate_dax.py extracts/model.bim --format json --strict
+py scripts/validate_dax.py extracts/model.bim --format json --strict
 ```
 
 ### 3. Check a TMDL semantic model (Analysis Services / Fabric)
 
 ```bash
-python scripts/validate_tmdl.py TmdlModel/ --strict
+py scripts/validate_tmdl.py TmdlModel/ --strict
 ```
 
 ### 4. Profile CSV extract from a source system
 
 ```bash
-python scripts/quality_check.py data/raw/erp_sales_20260901.csv \
+py scripts/quality_check.py data/raw/erp_sales_20260901.csv \
     --range qty:0:100000 \
     --range amount:0:10000000 \
     --primary-key sale_id \
@@ -131,7 +136,7 @@ python scripts/quality_check.py data/raw/erp_sales_20260901.csv \
 ### 5. Run the entire repo-level validation before committing
 
 ```bash
-python scripts/validate_project.py --repo . --strict
+py scripts/validate_project.py --repo . --strict
 ```
 
 The workflow files in `workflows/` describe how an agent composes these steps

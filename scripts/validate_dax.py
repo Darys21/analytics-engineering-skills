@@ -7,24 +7,24 @@ expressions. Detects common DAX anti-patterns, measure naming, and best
 practice violations.
 
 Checks performed:
-- Nested IF inside CALCULATE (should use CALCULATE with filter argument)
-- ALLSELECTED misuse heuristic (ALLSELECTED used outside CALCULATE modifier)
-- FILTER(ALL(...)) where ALLEXCEPT / ALLSELECTED / REMOVEFILTERS may be better
-- SUMX(Table, Table[Column]) could be SUM(Table[Column])
-- CALCULATE(COUNTROWS(Table), ...) vs COUNTROWS with CALCULATE filters
-- IF(VALUES(Col) = X, A, B) instead of SELECTEDVALUE
-- Missing DIVIDE function (use of / with denominator that could be 0 or BLANK)
-- CALCULATE + IF pattern instead of CALCULATE with filter
-- Measure name format (optional: PascalCase)
-- EARLIER usage (suggest variable instead)
-- Excessive use of nested CALCULATE (warning)
-- ROLLUPADDISSUBTOTAL / ISINSCOPE for subtotals recommendation
+- Unbalanced parentheses (ERROR, reliable syntax check)
+- Nested IF inside CALCULATE (WARN heuristic)
+- ALLSELECTED misuse heuristic (WARN)
+- FILTER(ALL(...)) where ALLEXCEPT / ALLSELECTED / REMOVEFILTERS may be better (WARN)
+- SUMX(Table, Table[Column]) potential SUM() simplification (WARN heuristic)
+- CALCULATE(COUNTROWS(Table), ...) pattern note (INFO)
+- IF(VALUES(Col) = X, A, B) instead of SELECTEDVALUE (WARN heuristic)
+- Missing DIVIDE function (WARN)
+- CALCULATE + IF pattern instead of CALCULATE with filter (WARN heuristic)
+- Measure name format (optional: PascalCase) (WARN)
+- EARLIER usage (WARN: variables preferred, EARLIER remains valid DAX)
+- Excessive use of nested CALCULATE (WARN)
 
-Limitations:
-- Not a true DAX parser; detection is regex-based.
-- Complex multi-line DAX with deeply nested parentheses may not be fully analyzed.
-- Cannot determine semantics: SUMX may be correct when the iterator is required.
-- Many warnings are heuristics. Review flagged issues manually.
+LIMITATIONS:
+  This validator uses regex heuristics. It cannot parse DAX semantics;
+  it flags common patterns for human review and cannot determine correctness.
+  Heuristic (WARN) findings require a human reviewer to assess whether the
+  flagged pattern is semantically required in the specific context.
 """
 
 import argparse
@@ -121,6 +121,19 @@ def load_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         description="Run static analysis checks on DAX code.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
+LIMITATIONS:
+  This validator uses regex heuristics. It cannot parse DAX semantics;
+  it flags common patterns for human review and cannot determine correctness.
+  Heuristic (WARN) findings require a human reviewer to assess whether the
+  flagged pattern is semantically required in the specific context.
+  ERROR-level findings are limited to regex-detectable syntactic impossibilities
+  (e.g., unbalanced parentheses).
+
+Severity levels:
+  ERROR  — reliable regex-detected syntax impossibility; review required.
+  WARN   — heuristic pattern flag; may be intentional in context. Review.
+  INFO   — informational note or alternative pattern suggestion.
+
 Examples:
   python validate_dax.py measures.dax
   python validate_dax.py ./dax_models/ --strict
@@ -249,13 +262,32 @@ def extract_dax_from_json(raw: str) -> List[str]:
     return dax_snippets
 
 
+def check_unbalanced_parens(text: str, file_ref: str, measure: str, issues: List[Issue]) -> None:
+    stripped_no_strings = re.sub(r'"[^"]*"', '""', text)
+    open_count = stripped_no_strings.count("(")
+    close_count = stripped_no_strings.count(")")
+    diff = open_count - close_count
+    if diff != 0:
+        direction = "more opening" if diff > 0 else "more closing"
+        issues.append(Issue(
+            SEVERITY_ERROR,
+            "unbalanced_parentheses",
+            f"Unbalanced parentheses detected: {abs(diff)} {direction} than closing "
+            f"(open={open_count}, close={close_count}). This is a syntax error that must be fixed.",
+            file_ref,
+            0,
+            measure,
+        ))
+
+
 def check_nested_if_in_calculate(text: str, file_ref: str, measure: str, issues: List[Issue]) -> None:
     for m in NESTED_IF_IN_CALCULATE_RE.finditer(text):
         issues.append(Issue(
             SEVERITY_WARN,
             "nested_if_in_calculate",
-            "Nested IF inside CALCULATE: consider moving conditional logic into a filter argument "
-            "or using SWITCH/SELECTEDVALUE for clarity.",
+            "[WARN] Potential CALCULATE+IF nesting. Review: consider moving conditional logic "
+            "into a CALCULATE filter argument or using SWITCH/SELECTEDVALUE for clarity. "
+            "Current pattern may trigger eager evaluation of both branches.",
             file_ref,
             line_of(text, m.start()),
             measure,
@@ -267,8 +299,10 @@ def check_calculate_if_filter(text: str, file_ref: str, measure: str, issues: Li
         issues.append(Issue(
             SEVERITY_WARN,
             "calculate_if_filter",
-            "CALCULATE uses IF(...) as a filter argument. Prefer CALCULATE(<measure>, <condition>) "
-            "or CALCULATE(<measure>, KEEPFILTERS(...)) to leverage engine optimization.",
+            "[WARN] Potential CALCULATE filter optimization review. IF(...) used as a CALCULATE "
+            "filter argument. Prefer CALCULATE(<measure>, <condition>) or "
+            "CALCULATE(<measure>, KEEPFILTERS(...)) when semantically equivalent, to "
+            "leverage storage-engine optimization. Review if IF is semantically required.",
             file_ref,
             line_of(text, m.start()),
             measure,
@@ -286,9 +320,10 @@ def check_allselected(text: str, file_ref: str, measure: str, issues: List[Issue
         issues.append(Issue(
             SEVERITY_WARN,
             "allselected_usage",
-            "ALLSELECTED() detected outside of a typical CALCULATE modifier position. "
-            "ALLSELECTED has complex shadow filter behavior; consider REMOVEFILTERS or "
-            "ALLEXCEPT when removing filters is the intent.",
+            "[WARN] Potential ALLSELECTED misuse. ALLSELECTED() detected outside a typical "
+            "CALCULATE modifier position. ALLSELECTED has complex shadow-filter behavior; "
+            "consider REMOVEFILTERS or ALLEXCEPT if the sole intent is removing filters. "
+            "Review: ALLSELECTED may be intentionally used for visual totals.",
             file_ref,
             line_of(text, m.start()),
             measure,
@@ -300,9 +335,11 @@ def check_filter_all(text: str, file_ref: str, measure: str, issues: List[Issue]
         issues.append(Issue(
             SEVERITY_WARN,
             "filter_all",
-            "FILTER(ALL(...)) detected: materializes the full table into memory. "
-            "Consider ALLEXCEPT, ALL(<col>), REMOVEFILTERS, or KEEPFILTERS when the "
-            "goal is removing/modifying filters rather than iterating the entire table.",
+            "[WARN] Potential FILTER(ALL) simplification. FILTER(ALL(...)) detected. This "
+            "materializes the full table into memory before filtering. Review: when the intent is "
+            "only to remove/modify filters (not iterate the table), consider ALLEXCEPT, "
+            "ALL(<col>), REMOVEFILTERS, or KEEPFILTERS. FILTER(ALL) may be "
+            "intentionally used when custom row-level logic is required.",
             file_ref,
             line_of(text, m.start()),
             measure,
@@ -316,11 +353,13 @@ def check_sumx_simple(text: str, file_ref: str, measure: str, issues: List[Issue
         col_part = col_expr.split("[")[0].strip() if "[" in col_expr else ""
         if col_part and col_part.lower() == table.lower():
             issues.append(Issue(
-                SEVERITY_INFO,
+                SEVERITY_WARN,
                 "sumx_suggestion",
-                f"SUMX({table}, {col_expr}) iterates a table just to sum a single column. "
-                "Unless a row-context transition is needed, SUM may be simpler: "
-                f"SUM({col_expr})",
+                f"[WARN] Potential SUMX simplification. SUMX({table}, {col_expr}) iterates "
+                "a table just to sum a single column. Review whether row context or "
+                "expression semantics require SUMX; otherwise SUM() is sufficient: "
+                f"SUM({col_expr}). SUMX may be intentionally retained for codebase pattern "
+                "consistency or context transition.",
                 file_ref,
                 line_of(text, m.start()),
                 measure,
@@ -333,7 +372,7 @@ def check_calc_countrows(text: str, file_ref: str, measure: str, issues: List[Is
         issues.append(Issue(
             SEVERITY_INFO,
             "calculate_countrows",
-            f"CALCULATE(COUNTROWS({table}), ...) pattern detected. Prefer "
+            f"[INFO] CALCULATE(COUNTROWS({table}), ...) pattern detected. Prefer "
             f"COUNTROWS(FILTER({table}, ...)) when filters modify the table directly, "
             f"or leave as-is if CALCULATE removes external filters intentionally.",
             file_ref,
@@ -347,8 +386,10 @@ def check_if_values(text: str, file_ref: str, measure: str, issues: List[Issue])
         issues.append(Issue(
             SEVERITY_WARN,
             "if_values",
-            "IF(VALUES(Column) = value, ...) pattern: use SELECTEDVALUE(Column, default) "
-            "or HASONEVALUE + VALUES to handle multi-value filter context safely.",
+            "[WARN] Potential SELECTEDVALUE replacement. IF(VALUES(Column) = value, ...) pattern "
+            "detected. Review IF/VALUES may not handle multi-value filter context safely. "
+            "Consider SELECTEDVALUE(Column, default) or HASONEVALUE + VALUES for explicit "
+            "multi-value guard. IF/VALUES may be required in edge cases.",
             file_ref,
             line_of(text, m.start()),
             measure,
@@ -360,8 +401,10 @@ def check_divide_missing(text: str, file_ref: str, measure: str, issues: List[Is
         issues.append(Issue(
             SEVERITY_WARN,
             "divide_missing",
-            "Use of '/' operator without DIVIDE: if denominator is 0 or BLANK, the result "
-            "is an error or unexpected BLANK. Prefer DIVIDE(numerator, denominator, alternateResult).",
+            "[WARN] Division operator review. Use of '/' without DIVIDE detected. If denominator "
+            "is 0 or BLANK the result is NaN/Infinity or unexpected BLANK. Prefer "
+            "DIVIDE(numerator, denominator, alternateResult) for safe division. Review "
+            "if denominator is provably non-zero from upstream constraints.",
             file_ref,
             line_of(text, m.start()),
             measure,
@@ -374,8 +417,11 @@ def check_earlier(text: str, file_ref: str, measure: str, issues: List[Issue]) -
         issues.append(Issue(
             SEVERITY_WARN,
             "earlier_usage",
-            "EARLIER() detected: this function is deprecated in modern DAX. Use a variable "
-            "(VAR x = <expr>) outside the iterator and reference x instead; it is clearer and faster.",
+            "[WARN] EARLIER review. EARLIER() detected: variables are almost always preferred "
+            "over EARLIER for readability. EARLIER remains valid DAX. EARLIER/EARLIEST "
+            "access an outer row context; variables (VAR x = <expr> outside the inner "
+            "iterator) achieve the same result and are clearer. Review and consider a "
+            "variable-based replacement before committing.",
             file_ref,
             line_of(text, m.start()),
             measure,
@@ -387,8 +433,10 @@ def check_nested_calculate(text: str, file_ref: str, measure: str, issues: List[
         issues.append(Issue(
             SEVERITY_WARN,
             "nested_calculate",
-            "Nested CALCULATE(CALCULATE(...)) detected: verify filter semantics are intended. "
-            "Prefer combining filter arguments in a single CALCULATE when possible.",
+            "[WARN] Nested CALCULATE review. Nested CALCULATE(CALCULATE(...)) detected. Verify "
+            "filter semantics are intended. Prefer combining filter arguments in a single "
+            "CALCULATE when semantically equivalent. Nested CALCULATE may be intentionally "
+            "used to create specific filter-context layering.",
             file_ref,
             line_of(text, m.start()),
             measure,
@@ -416,6 +464,9 @@ def analyze_text(full_text: str, file_ref: str, disabled: Set[str], naming: str)
     issues: List[Issue] = []
     stripped = strip_dax_comments(full_text)
     measures = extract_measure_definitions(full_text)
+
+    if "unbalanced_parentheses" not in disabled:
+        check_unbalanced_parens(stripped, file_ref, "(global)", issues)
 
     if "measure_naming" not in disabled:
         check_measure_naming(measures, file_ref, naming, issues)
@@ -561,6 +612,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         if args.verbose:
             print(f"Info           : {len(infos)}")
         print("=" * 72)
+
+    show_limitations = args.verbose or len(warnings) > 0
+    if not args.json and show_limitations:
+        print()
+        print("LIMITATIONS:")
+        print("  This validator uses regex heuristics. It cannot parse DAX semantics;")
+        print("  it flags common patterns for human review and cannot determine correctness.")
+        print("  WARN-level findings are heuristics — they may be intentionally required")
+        print("  in the specific context (e.g. CALCULATE context transition inside an")
+        print("  iterator, SUMX used for deliberate row-context semantics, ALLSELECTED")
+        print("  for visual-total logic). Every WARN requires a human reviewer to assess.")
+        print("  ERROR-level findings are limited to regex-detectable syntactic issues.")
 
     fatal = len(errors) > 0 or (args.strict and len(warnings) > 0)
     if fatal:

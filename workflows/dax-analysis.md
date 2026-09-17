@@ -39,12 +39,14 @@ Write correct, debuggable, performant DAX measures for Power BI / Analysis Servi
    1. **CALCULATE = modify filter context.** Every argument after the first is a filter modifier. Know exactly what each modifier does:
       - `Table[Col] = value` → replaces filter on `Table[Col]` with a single value.
       - `FILTER(Table, ...)` → adds a filter by keeping rows that match; FILTER is an iterator and is expensive on large tables. Prefer `CALCULATE(..., KEEPFILTERS(Table[Col] IN {..}))` or `TREATAS` when possible.
-      - `ALL(Table)`, `ALL(Table[Col])`, `REMOVEFILTERS(...)`, `ALLEXCEPT(...)` → remove filters; used for percentages of grand total.
+      - `ALL(Table)` / `ALL(Table[Col])` → removes filters AND returns the full table / distinct column values as a table expression (usable as iterator input).
+      - `REMOVEFILTERS(Table)` / `REMOVEFILTERS(Table[Col])` → removes filters ONLY; does not return a table to iterate over. **Preferred pattern** over `ALL()` when the intent is *only* to clear filters (not to provide a table to an iterator). Available in modern Analysis Services (2019+), Power BI, and Microsoft Fabric; use `ALL()` in the same role for older engines.
+      - `ALLEXCEPT(Table, Col1, Col2, ...)` → removes filters on all columns except the listed ones; used for grand-total percentages that preserve a subset of slicers.
       - `USERELATIONSHIP(Table[FK], Dim[SK])` → activate an inactive relationship for this measure ONLY; use for role-playing dates (order date, ship date, invoice date).
       - `CROSSFILTER(Col1, Col2, Both/None/Single)` → override relationship direction for this measure; dangerous outside M2M bridges.
       - `KEEPFILTERS` → intersect an existing filter with the new filter instead of replacing; mandatory inside CALCULATE when you don't want to overwrite user slicer choices.
-   2. **Anti-patterns to avoid:**
-      - `CALCULATE` wrapping a single aggregator with no filter modifier: `CALCULATE(SUM(...))` is always redundant. Remove it.
+   2. **Patterns to review:**
+      - `CALCULATE` wrapping a single aggregator with no filter modifier: `CALCULATE(SUM(...))` may be a POTENTIAL simplification in simple cases. Review whether context transition is required: `CALCULATE` performs context transition inside iterators, calculated columns, and any row-context scenario (row context → filter context transitions). Inside a standalone measure with no row context and no filter modifier, `CALCULATE(SUM(...))` is typically unnecessary — but it is NOT universally incorrect. Verify semantics before removing.
       - Boolean predicates on whole tables inside CALCULATE: `CALCULATE([measure], fct_sales[amount] > 1000)` is internally rewritten to `FILTER(ALL(fct_sales), ...)` which can expand to the entire fact table. Always scope to a column: `CALCULATE([measure], FILTER(VALUES(fct_sales[amount]), fct_sales[amount] > 1000))` or use `KEEPFILTERS`.
       - Nested `CALCULATE(CALCULATE(CALCULATE(...)))` — unnest and reason about the filter stack. If more than 2 levels, the measure should be split into helper measures.
 3. **Use iterators (X-suffix functions) for row-context logic and ratio safety.**
@@ -54,6 +56,7 @@ Write correct, debuggable, performant DAX measures for Power BI / Analysis Servi
         - The computation has mixed grain (e.g., `SUMX(invoice_header, header_level_amount)` across invoice lines).
         - The expression is an arithmetic combination of columns that must be computed per-row, then aggregated.
         - The numerator or denominator of a ratio is itself a measure, and you need context transition: `SUMX(VALUES(DimDate[Month]), [Monthly Measure])`.
+      - `SUMX(Table, Table[SingleColumn])` where Table and the column's owning table match, and no measure/reference to another table's column occurs: **this is a POTENTIAL simplification only.** Review whether row context or expression semantics require SUMX; otherwise `SUM()` is sufficient. SUMX here is NOT universally incorrect — it may be intentionally used for context transition or to match a pattern across the codebase.
    2. **Ratio and percent-of-total pattern (standard):**
       ```dax
       Margin % =
@@ -128,18 +131,44 @@ Write correct, debuggable, performant DAX measures for Power BI / Analysis Servi
       - Each calculation item applies a `SELECTEDMEASURE()` transformation.
       - Attach format string expressions so "YoY %" auto-renders as percent.
       - Calculation groups reduce measure count from N×M (base measures × variants) to N + M; mandatory when variants exceed 3 per base measure.
-8. **Measure performance: optimize Storage Engine (SE) scans, reduce Formula Engine (FE) serial work, debug cardinality.**
-   1. **Run every measure through DAX Studio with Server Timings ON + Query Plan ON.**
-   2. **Interpret Server Timings:**
-      - Total = SE CPU + FE CPU + Wait. If FE is >50% of total on a simple aggregation, an iterator or a complex FILTER is forcing serial FE work.
-      - Look for "SE Queries Count": ideally 1–3 for a simple measure; >10 indicates the formula engine is running many small scans.
-      - If "Number of Rows Scanned" in SE is orders of magnitude larger than expected output, the filter is not being pushed to SE (likely because a column predicate was written as a table FILTER anti-pattern).
-   3. **Reduce FE work:**
-      - Convert FILTER(fact, predicate) patterns to column-scoped filters where possible.
-      - Replace `SUMX(fact, expression)` on large facts with a SQL-pushdown computed column + base SUM measure (most impactful single optimization).
-      - Reduce iterator cardinality: `SUMX(VALUES(DimProduct[ProductKey]), [Measure])` iterates the distinct count of products, not the fact row count.
-   4. **Cardinality checks:** Use `EVALUATE ROW("Cardinality", COUNTROWS(VALUES(fact[col])))` in DAX Studio for every column in a relationship. High-cardinality joins (>1M distinct values) slow SE; if possible, reduce grain upstream in SQL.
-   5. **Avoid `ALLSELECTED` traps:** `ALLSELECTED` depends on the exact visual's query shape and can silently break when the user adds/removes columns. Prefer explicit `ALL/ALLEXCEPT/REMOVEFILTERS` + `KEEPFILTERS` when possible.
+8. **Optimize performance: follow the MEASURE → bottleneck → HYPOTHESIS → change → BENCHMARK → VALIDATE → DOCUMENT workflow from `optimize.md`.**
+   Optimization work below happens **only after correctness is validated**.
+   1. **MEASURE baseline.**
+      - Run every measure through DAX Studio with Server Timings ON + Query Plan ON.
+      - Capture baseline: duration (cold + warm cache), SE CPU vs FE CPU split, SE queries count, rows scanned per SE call, spool sizes in physical plan, and representative filter context (e.g., 1-year × 10-product matrix shape).
+   2. **IDENTIFY bottleneck.**
+      - Establish baseline and bottleneck. Measure storage engine vs formula engine; the bottleneck drives optimization, not an arbitrary count or percentage.
+      - Attribute ~80% of the baseline cost to the smallest set of operations (Pareto).
+      - Name the bottleneck type: e.g., "FE serial callbacks from SUMX over 5M-row fact with measure call per row", "FILTER(ALL(fact)) materializing 100M rows", "bi-directional snowflake filter expansion", "Vertipaq scan without date predicate pushdown".
+      - Interpret Server Timings relative to your workload baseline:
+        - If FE share is much higher than SE share for a simple additive measure, investigate iterator callbacks or complex FILTER materialization.
+        - If SE queries count is far higher than similar measures, look for per-member CALCULATE patterns.
+        - If "Number of Rows Scanned" is orders of magnitude larger than the filter context implies, the predicate is not being pushed to SE (often a table-FILTER anti-pattern).
+   3. **FORM HYPOTHESIS.**
+      - For the identified bottleneck, propose exactly one targeted change and predict its effect on the bottleneck metric.
+      - Change one meaningful factor at a time so results are attributable.
+   4. **OPTIMIZE (single change).**
+      - Apply the change; keep the pre-change version for reconciliation.
+      - Common SE-focused optimizations:
+        - Convert `FILTER(fact, predicate)` patterns to column-scoped filters or `KEEPFILTERS` column predicates.
+        - Reduce iterator cardinality: `SUMX(VALUES(DimProduct[ProductKey]), [Measure])` iterates product distinct count, not fact row count.
+        - Push static per-row computations from `SUMX(fact, expression)` to SQL-pushdown computed columns + base `SUM` measure (often the highest-impact single change).
+      - Common FE-focused optimizations:
+        - Hoist repeated expressions into variables (evaluated once).
+        - Reduce nested measure recursion that triggers repeated context transitions.
+   5. **BENCHMARK.**
+      - Same environment, same filter context, same warm/cold state as baseline.
+      - Run multiple times; report median and variance.
+      - Re-measure the bottleneck metric specifically, not just end-to-end duration.
+   6. **VALIDATE correctness.**
+      - Numerical equivalence against known-good outputs across representative slices (grand total, single cell, subtotal, slicer-filtered, edge-case date).
+      - If numbers drift, root-cause before proceeding — the optimization may be subtly changing filter semantics.
+   7. **DOCUMENT.**
+      - Record baseline, bottleneck, change, new measurement, correctness confirmation, known trade-off, remaining headroom.
+   8. Repeat 3–7 only while the next bottleneck is larger than the cost of stopping. Stop when the agreed target is met or the next optimization's cost exceeds its value.
+   9. **Additional notes:**
+      - Cardinality checks: Use `EVALUATE ROW("Cardinality", COUNTROWS(VALUES(fact[col])))` in DAX Studio for relationship columns; compare high-cardinality join costs against upstream grain-reduction options.
+      - `ALLSELECTED` review: `ALLSELECTED` depends on the visual's exact query shape and can silently change meaning when visuals are edited. Prefer explicit `ALL/ALLEXCEPT/REMOVEFILTERS` + `KEEPFILTERS` when the filter semantics can be expressed without shadow-filter reliance. **Context-dependent recommendation:** use `ALLSELECTED` when you genuinely need "whatever the visual currently shows" but document it.
 9. **Debug with DAX Studio; use anti-pattern detector rules.**
    1. **Catch silent wrong totals before stakeholders do:** For every measure, test it in these scopes: (a) grand total row of a matrix, (b) a single cell, (c) a subtotal row, (d) filtered by a slicer that excludes the relationship, (e) filtered to a single date. Compare every result to the gold mart SQL baseline.
    2. **Use Server Timings + Query Plan to localize performance issues:**
@@ -171,16 +200,15 @@ Write correct, debuggable, performant DAX measures for Power BI / Analysis Servi
 ## Validation
 
 - Every measure has a populated description field containing its context spec (step 1).
-- No orphaned `CALCULATE(agg)` with no filter modifier; every CALCULATE has at least one filter argument.
-- Time-intelligence functions reference only `DimDate[Date]`, never fact-table dates.
-- Semi-additive measures use LASTNONBLANK / AVERAGEX / CLOSINGBALANCE* wrappers; plain `SUM` is not applied across time.
+- `CALCULATE(agg)` with no filter modifier is *reviewed*: the reviewer confirms whether context transition was intended. No blanket removal without semantic check.
+- Time-intelligence functions reference only `DimDate[Date]`, never fact-table dates. **Hard correctness rule.**
+- Semi-additive measures use LASTNONBLANK / AVERAGEX / CLOSINGBALANCE* wrappers; plain `SUM` is not applied across snapshot time.
 - Iterators iterate the smallest cardinality possible (dimension key VALUES tables, not fact tables full rows) unless row-level fact columns are required.
 - Variables are used for all complex measures; no nested IF/AND/OR spaghetti without VARs.
 - Calculation groups are used when variants × base >30.
 - No bidirectional filter edges outside M2M bridge patterns; each bidirectional edge is individually documented.
 - No `SUMMARIZE` with computed columns (potential subtotal bug); use SUMMARIZE + ADDCOLUMNS or GROUPBY.
-- DAX Studio Server Timings show FE CPU ≤50% of total CPU for all KPI measures on the baseline dataset.
-- No "CallbackDataID" entries in Query Plan for KPI measures.
+- Performance baseline is captured and bottleneck is identified in DAX Studio (Server Timings + Query Plan) for every KPI measure. Any CallbackDataID entries in Query Plan for KPI measures are reviewed.
 - BPA scan shows 0 Medium+ severity findings.
 - 5 known-cell values + grand total + YoY + YTD reconcile to gold mart SQL within tolerance.
 - Format strings are explicit.
@@ -197,8 +225,8 @@ Write correct, debuggable, performant DAX measures for Power BI / Analysis Servi
 
 ## Common failure modes
 
-1. **`CALCULATE(SUM(...))` with no filter argument.** Runs but is a warning sign the author did not understand CALCULATE; usually follows bugs when they later add filter logic. Remedy: remove it.
-2. **Time intelligence on fact dates.** `SAMEPERIODLASTYEAR(fct_sales[order_date])` silently returns nothing because the fact table has no contiguous dates. Remedy: step 6 mandates DimDate only.
+1. **`CALCULATE(SUM(...))` with no filter argument — removed without semantic check.** In a standalone measure with no row context this is typically unnecessary and can be safely simplified; but inside an iterator, calculated column, or expression where CALCULATE performs context transition, removing it changes the result. Remedy: step 2.2 requires explicit review before removing; verify that no context transition was required.
+2. **Time intelligence on fact dates.** `SAMEPERIODLASTYEAR(fct_sales[order_date])` silently returns nothing because the fact table has no contiguous dates. Remedy: step 6 mandates DimDate only. **Hard correctness rule.**
 3. **Semi-additive balance summed across time.** Inventory balance sum across January + February = nonsense. Remedy: step 7.1 semi-additive wrappers; base measure never exposes plain `SUM(Balance)` without a wrapper.
 4. **Sum-of-ratios vs ratio-of-sums confusion.** Margin % per region = 12% when it should be 9%. Remedy: step 3.2 explicit choice in context spec; the default is always ratio-of-sums.
 5. **Iterator over fact table when VALUES(Dim) suffices.** `AVERAGEX(fct_movement, [Daily Balance])` counts movement rows, not days. Remedy: step 4.3 rule.
@@ -230,9 +258,9 @@ Write correct, debuggable, performant DAX measures for Power BI / Analysis Servi
 - Semi-additive measures wrapped; no plain SUM across snapshot time.
 - BPA shows 0 Medium+ findings.
 - All KPI measures pass gold mart reconciliation within tolerance across: 5 known cells, grand total, YTD, YoY, WoW.
-- DAX Studio Server Timings for KPI measures: FE CPU ≤50% of total; 0 CallbackDataID entries; SE queries count ≤10 for baseline.
+- Performance work (if performed) follows the optimize.md workflow: baseline measured → bottleneck identified → single change → benchmarked against baseline → correctness revalidated → documented. Any CallbackDataID entries in KPI measures are reviewed and their cost quantified.
 - CI runs measure test suite; green.
 - Calculation groups are used when base × variant >30.
 - Format strings are explicit.
-- PR description links to: BPA report, Server Timings export, reconciliation workbook export.
+- PR description links to: BPA report, Server Timings / baseline + benchmark export, reconciliation workbook export.
 - PR reviewed against rubric and merged.

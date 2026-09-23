@@ -131,8 +131,8 @@ Templates are reusable output artifact formats under `templates/`.
    company-specific assumptions.
 3. Call out which workflows produce this artifact (link from the workflow's
    Deliverables section).
-4. Keep the file generic: remove any SETRAG / Eramet / railway-specific
-   content before merging.
+4. Keep the file generic: remove any company- or domain-specific content
+   before merging.
 
 ### 2.4 Add a Validator Script
 
@@ -244,7 +244,7 @@ before opening a PR:
       version (e.g. `onboard_source_system.md`, `star_schema_design.md`)
       verify it still exists; remove or update dead references.
 - [ ] **No project-specific contamination** in generic templates or
-      references. Realistic-looking SETRAG/Eramet/railway values do not
+      references. Realistic-looking company- or domain-specific values do not
       belong in reusable generic artifacts.
 - [ ] **Technical accuracy.** Claims involving DAX semantics, SQL NULL
       behavior, statistical significance, and performance thresholds are
@@ -270,7 +270,7 @@ Format:
 Valid `type` values in this repo:
 
 - `feat` — new workflow, new reference, new validator rule, new eval case.
-- `fix` — bugfix in a validator, broken links, routing correction, schema
+- `fix` — bug fix in a validator, broken links, routing correction, schema
   fix in evals.
 - `docs` — README, CONTRIBUTING, how-to-use, architecture, design docs.
 - `refactor` — restructure code/workflow text without changing behavior.

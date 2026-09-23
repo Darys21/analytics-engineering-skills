@@ -9,7 +9,10 @@ starting from `v1.0.0`. Pre-`1.0.0` releases use the convention
 
 ## [Unreleased]
 
-(nothing yet)
+### Changed
+
+- Removed remaining company-specific name references from README, CONTRIBUTING
+  and historical notes so the skill is fully general-purpose.
 
 ---
 
@@ -183,8 +186,8 @@ starting from `v1.0.0`. Pre-`1.0.0` releases use the convention
 ### Security (v0.2)
 
 - All company-specific prompt source files explicitly excluded from
-  repository tracking via `.gitignore` rules; no Eramet/SETRAG internal
-  documentation leaks to the public remote.
+  repository tracking via `.gitignore` rules; no internal documentation
+  leaks to the public remote.
 - Validators continue to use Python stdlib only (zero third-party
   transitive dependencies, zero supply-chain surface in CI).
 
@@ -276,5 +279,5 @@ starting from `v1.0.0`. Pre-`1.0.0` releases use the convention
 - `quality_check.py` loads full files into memory; use `--sample N` for
   large CSV/Parquet inputs.
 
-[Unreleased]: https://github.com/<org>/<repo>/compare/v0.1.0...HEAD
-[v0.1.0]: https://github.com/<org>/<repo>/releases/tag/v0.1.0
+[Unreleased]: https://github.com/Darys21/analytics-engineering-skills/compare/v0.1.0...HEAD
+[v0.1.0]: https://github.com/Darys21/analytics-engineering-skills/releases/tag/v0.1.0

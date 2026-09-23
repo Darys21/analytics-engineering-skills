@@ -6,9 +6,7 @@ provides reusable **workflows**, **reference** material, **templates**,
 **validators** (scripts/), and an **evaluation** harness so that an LLM agent
 can produce trustworthy, reviewable results.
 
-> Designed for the SETRAG / Eramet analytics platform context and generalizable
-> to any modern warehouse stack (SQL, DAX / Power BI, TMDL, CSV / Parquet data
-> pipelines).
+Designed to work with any modern warehouse stack (SQL, DAX / Power BI, TMDL, CSV / Parquet data pipelines).
 
 ## 🚀 How to use this skill
 
@@ -34,7 +32,7 @@ analyst would ship.
 ## Repository Structure
 
 ```
-analytics-engineer-agent-skills/
+analytics-engineering-skills/
 ├── SKILL.md                # Top-level skill manifest (agents read this first)
 ├── README.md               # This file
 ├── LICENSE                 # Apache License 2.0
@@ -76,7 +74,7 @@ analytics-engineer-agent-skills/
 ```bash
 # 1. Clone the repository.
 git clone https://github.com/Darys21/analytics-engineering-skills.git
-cd analytics-engineering-agent-skills
+cd analytics-engineering-skills
 
 # 2. (Optional) create a virtual environment.
 # Windows (py launcher):

@@ -94,6 +94,7 @@ Do **NOT** use:
 - `references/visualization.md` — detailed chart-selection matrix, encodings, palette references, anti-patterns.
 - `references/dashboard-ux.md` → after chart design, if this is part of a dashboard.
 - `references/statistics.md` if visualizing uncertainty / distributions / confidence bands.
+- **Optional example:** `references/ecommerce-retail-case-study.md` — shows how charts sit inside a decision hierarchy (KPI strip → diagnosis → detail). Load only for illustration; chart choices must still answer the *current* question.
 
 ## Completion criteria
 - Each chart has a named question and answers it.

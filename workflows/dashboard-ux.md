@@ -91,6 +91,7 @@ Design a dashboard as a decision interface, not as a collection of charts. Optim
 - `references/power-bi.md` + `workflows/dax-analysis.md` + `workflows/tmdl-analysis.md` if Power BI semantic.
 - `references/performance.md` — dashboard response time, DAX tuning.
 - `references/security.md` — row-level security, PII masking.
+- **Optional example:** `references/ecommerce-retail-case-study.md` — concrete worked example of personas, grain, KPI strip, and Context → KPI → Diagnosis → Detail → Action hierarchy. Load only if you need an illustration; do **not** force retail metrics onto other domains.
 
 ## Completion criteria
 - Primary decision defined; one dashboard serves that decision.

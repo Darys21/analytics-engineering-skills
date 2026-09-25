@@ -10,6 +10,9 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: skills/analytics-engineering-skills
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -19,9 +22,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies (none — validators use stdlib only)
+      - name: Install optional PyYAML (stricter frontmatter parse)
         run: |
-          echo "No dependencies required. All validators use Python stdlib."
+          python -m pip install --upgrade pip
+          if [ -f ../../requirements.txt ]; then pip install -r ../../requirements.txt; fi
           python --version
 
       - name: Run validate_project.py --strict

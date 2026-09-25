@@ -1,4 +1,4 @@
-# Dashboard Ux
+# Multiple Comparison Correction Guide
 
 Stub file for repository structure and cross-reference validation.
 

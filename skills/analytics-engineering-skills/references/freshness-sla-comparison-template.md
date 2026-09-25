@@ -1,4 +1,4 @@
-# Dashboard Ux
+# Freshness Sla Comparison Template
 
 Stub file for repository structure and cross-reference validation.
 

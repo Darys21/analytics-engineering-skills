@@ -1,4 +1,4 @@
-# Dashboard Ux
+# Grain Fanout Checklist
 
 Stub file for repository structure and cross-reference validation.
 

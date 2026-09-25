@@ -1,4 +1,4 @@
-# Dashboard Ux
+# Dax Patterns
 
 Stub file for repository structure and cross-reference validation.
 

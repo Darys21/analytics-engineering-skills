@@ -1,4 +1,4 @@
-# Dashboard Ux
+# Grain Definition Examples
 
 Stub file for repository structure and cross-reference validation.
 

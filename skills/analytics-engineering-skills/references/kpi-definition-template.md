@@ -1,4 +1,4 @@
-# Dashboard Ux
+# Kpi Definition Template
 
 Stub file for repository structure and cross-reference validation.
 

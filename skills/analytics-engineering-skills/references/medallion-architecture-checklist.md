@@ -1,4 +1,4 @@
-# Dashboard Ux
+# Medallion Architecture Checklist
 
 Stub file for repository structure and cross-reference validation.
 

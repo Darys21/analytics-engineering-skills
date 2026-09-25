@@ -1,4 +1,4 @@
-# Dashboard Ux
+# Dax Review Rubric
 
 Stub file for repository structure and cross-reference validation.
 

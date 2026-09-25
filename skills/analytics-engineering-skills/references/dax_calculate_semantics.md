@@ -1,4 +1,4 @@
-# Dashboard Ux
+# Dax Calculate Semantics
 
 Stub file for repository structure and cross-reference validation.
 

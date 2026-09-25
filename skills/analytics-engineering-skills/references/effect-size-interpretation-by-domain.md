@@ -1,4 +1,4 @@
-# Dashboard Ux
+# Effect Size Interpretation By Domain
 
 Stub file for repository structure and cross-reference validation.
 

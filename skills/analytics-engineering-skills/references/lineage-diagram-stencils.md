@@ -1,4 +1,4 @@
-# Dashboard Ux
+# Lineage Diagram Stencils
 
 Stub file for repository structure and cross-reference validation.
 

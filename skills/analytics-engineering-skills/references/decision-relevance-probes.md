@@ -1,4 +1,4 @@
-# Dashboard Ux
+# Decision Relevance Probes
 
 Stub file for repository structure and cross-reference validation.
 

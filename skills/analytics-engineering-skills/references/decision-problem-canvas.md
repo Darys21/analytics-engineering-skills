@@ -1,4 +1,4 @@
-# Dashboard Ux
+# Decision Problem Canvas
 
 Stub file for repository structure and cross-reference validation.
 

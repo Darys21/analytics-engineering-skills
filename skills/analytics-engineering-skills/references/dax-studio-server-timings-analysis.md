@@ -1,4 +1,4 @@
-# Dashboard Ux
+# Dax Studio Server Timings Analysis
 
 Stub file for repository structure and cross-reference validation.
 

@@ -1,4 +1,4 @@
-# Dashboard Ux
+# Iqr Outliers
 
 Stub file for repository structure and cross-reference validation.
 

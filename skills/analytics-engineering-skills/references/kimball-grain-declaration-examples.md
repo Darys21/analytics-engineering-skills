@@ -1,4 +1,4 @@
-# Dashboard Ux
+# Kimball Grain Declaration Examples
 
 Stub file for repository structure and cross-reference validation.
 

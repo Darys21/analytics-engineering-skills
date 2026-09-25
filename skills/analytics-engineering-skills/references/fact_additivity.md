@@ -1,4 +1,4 @@
-# Dashboard Ux
+# Fact Additivity
 
 Stub file for repository structure and cross-reference validation.
 

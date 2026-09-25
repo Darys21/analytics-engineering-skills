@@ -172,7 +172,7 @@ These principles apply to **any** domain (transport, healthcare, finance, SaaS, 
 | Turn decision into KPI / grain / dimensions | `workflows/business-analysis.md` |
 | Design dashboard layout & hierarchy | `workflows/dashboard-ux.md` |
 | Choose individual charts | `workflows/visualization.md` |
-| Dimensional modeling | `workflows/data-modeling.md`, `workflows/star_schema_design.md` |
+| Dimensional modeling | `workflows/data-modeling.md` |
 | DAX / semantic model | `workflows/dax-analysis.md`, `workflows/tmdl-analysis.md` |
 
 ---

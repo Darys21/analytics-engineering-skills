@@ -1,6 +1,6 @@
 ---
 name: analytics-engineering-skills
-description: Modular analytics engineering skill. Trigger for: analytics engineering, data analysis, business analysis, SQL, Python, DAX, TMDL, Power BI, data modeling, data quality, BI, dashboards, statistics, data science, pipelines, ETL, ELT, semantic models, query optimization, data validation, analytical troubleshooting.
+description: "Modular analytics engineering skill. Trigger for: analytics engineering, data analysis, business analysis, SQL, Python, DAX, TMDL, Power BI, data modeling, data quality, BI, dashboards, statistics, data science, pipelines, ETL, ELT, semantic models, query optimization, data validation, analytical troubleshooting."
 ---
 
 # Analytics Engineering Skills Repository

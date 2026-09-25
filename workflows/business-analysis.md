@@ -107,6 +107,7 @@ Translate a signed-off GRILL output into a precisely scoped decision problem wit
 - `references/grain-fanout-checklist.md` — step-by-step fan-out detection using sample row calculations
 - `references/business-spec-review-checklist.md` — 20-item pass/fail checklist for validating the BUSINESS-SPEC document before sign-off
 - `references/decision-relevance-probes.md` — 15 follow-up questions to determine whether a dimension actually influences a choice
+- **Optional example:** `references/ecommerce-retail-case-study.md` — concrete illustration of personas, primary decisions, grain declaration, and KPI hierarchy. Load only if helpful; re-derive everything for the current domain via GRILL + this workflow. Do **not** reuse retail metrics on non-retail projects.
 
 ## Completion criteria
 

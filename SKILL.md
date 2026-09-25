@@ -1,6 +1,6 @@
 ---
 name: analytics-engineering-skills
-description: Modular analytics engineering skill. Trigger for: analytics engineering, data analysis, business analysis, SQL, Python, DAX, TMDL, Power BI, data modeling, data quality, BI, dashboards, statistics, data science, pipelines, ETL, ELT, semantic models, query optimization, data validation, analytical troubleshooting.
+description: "Modular analytics engineering skill. Trigger for: analytics engineering, data analysis, business analysis, SQL, Python, DAX, TMDL, Power BI, data modeling, data quality, BI, dashboards, statistics, data science, pipelines, ETL, ELT, semantic models, query optimization, data validation, analytical troubleshooting."
 ---
 
 # Analytics Engineering Skills Repository
@@ -79,6 +79,8 @@ Select workflow(s) by intent. Compose rather than replace.
 | "Anything unclear" *before* coding | grill |
 
 If the intent is genuinely ambiguous, enter `grill` first. Never jump into SQL/Python/DAX before the business question and grain are pinned.
+
+**Optional worked example:** `references/ecommerce-retail-case-study.md` illustrates personas, grain, KPI hierarchy, and Context → KPI → Diagnosis → Detail → Action on a retail dashboard. Use only when you need a concrete illustration of good structure. Never force retail metrics (RFM, CLV, market basket, etc.) onto other domains — always re-derive from the current brief via `grill` + `business-analysis`.
 
 ## Progressive Disclosure
 

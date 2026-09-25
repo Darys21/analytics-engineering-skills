@@ -110,3 +110,5 @@ data/processed/
 *.tmp
 *.old
 *.orig
+# ----- venv folder 
+.venv  

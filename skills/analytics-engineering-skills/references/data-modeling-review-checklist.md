@@ -1,4 +1,4 @@
-# Adr Template
+# Data Modeling Review Checklist
 
 Stub file for repository structure and cross-reference validation.
 

@@ -1,4 +1,4 @@
-# Adr Template
+# Cardinality And Ri Checklist
 
 Stub file for repository structure and cross-reference validation.
 

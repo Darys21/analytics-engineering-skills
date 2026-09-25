@@ -1,4 +1,4 @@
-# Adr Template
+# Confidence Interval Methods Cheatsheet
 
 Stub file for repository structure and cross-reference validation.
 

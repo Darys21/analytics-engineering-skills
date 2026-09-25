@@ -1,4 +1,4 @@
-# Adr Template
+# Calculation Groups Cookbook
 
 Stub file for repository structure and cross-reference validation.
 

@@ -1,4 +1,4 @@
-# Adr Template
+# Dax Anti Patterns And Fixes
 
 Stub file for repository structure and cross-reference validation.
 

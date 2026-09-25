@@ -1,4 +1,4 @@
-# Adr Template
+# Audit Columns
 
 Stub file for repository structure and cross-reference validation.
 

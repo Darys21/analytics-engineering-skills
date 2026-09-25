@@ -1,4 +1,4 @@
-# Adr Template
+# Dax Analysis Review Checklist
 
 Stub file for repository structure and cross-reference validation.
 

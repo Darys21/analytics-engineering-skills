@@ -1,4 +1,4 @@
-# Adr Template
+# Data Quality Dimensions Definitions
 
 Stub file for repository structure and cross-reference validation.
 

@@ -1,4 +1,4 @@
-# Adr Template
+# Bridge Table M2m Patterns
 
 Stub file for repository structure and cross-reference validation.
 

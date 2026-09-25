@@ -1,4 +1,4 @@
-# Adr Template
+# Data Quality
 
 Stub file for repository structure and cross-reference validation.
 

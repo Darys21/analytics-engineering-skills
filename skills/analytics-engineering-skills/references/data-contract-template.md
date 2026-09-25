@@ -1,4 +1,4 @@
-# Adr Template
+# Data Contract Template
 
 Stub file for repository structure and cross-reference validation.
 

@@ -1,4 +1,4 @@
-# Adr Template
+# Causal Inference Limitations Template
 
 Stub file for repository structure and cross-reference validation.
 

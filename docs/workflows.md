@@ -12,7 +12,7 @@ compose into larger pipelines.
 
 | ID / File | Purpose | When to Use | Composes With / Calls | Outputs |
 |---|---|---|---|---|
-| **1. Source Data Onboarding**<br>`workflows/onboard_source_system.md` | Bring a new source system or feed into the warehouse staging layer end to end. | A new data source is identified, extraction credentials are available, and business owner has signed off on freshness/SLA. | `profile_source_data.md`, `design_staging_schema.md`, `create_staging_sql.md`, `review_staging_sql.md`, `run_data_quality_checks.md` | Staging tables (DDL + SQL), data quality report, staging ERD snippet, load schedule entry. |
+| **1. Source Data Onboarding**<br>`workflows/onboard_source_system.md` | Bring a new source system or feed into the warehouse staging layer end to end. | A new data source is identified, extraction credentials are available, and business owner has signed off on freshness/SLA. | `workflows/data-discovery.md`, `design_staging_schema.md`, `workflows/sql-analysis.md`, `review_staging_sql.md`, `run_data_quality_checks.md` | Staging tables (DDL + SQL), data quality report, staging ERD snippet, load schedule entry. |
 | **2. Profile Source Data**<br>`workflows/profile_source_data.md` | Measure structure, completeness, uniqueness, value distribution, and anomalies of a raw or staged dataset. | Before any SQL model is designed; when validating a new external feed; periodically to detect drift. | `scripts/quality_check.py`, `references/iqr_outliers.md`, `references/naming_conventions.md` | Data quality report (JSON + summary), completeness matrix, uniqueness per column, PK candidate list, known-issues tracker. |
 | **3. Design Staging Schema**<br>`workflows/design_staging_schema.md` | Define column names, types, nullability, and audit fields for 1:1 landing zone tables. | Source profile is in hand; before writing staging SQL. | `references/naming_conventions.md`, `references/audit_columns.md`, `templates/tmdl_table_template.tmdl` (if semantic model is part of scope). | Column list (table), staging-ERD, list of type coercions and why. |
 | **4. Create Staging SQL**<br>`workflows/create_staging_sql.md` | Write the transformation SQL that moves source columns into staging schema (cast, rename, add audit fields). | Staging schema is approved by review. | `templates/sql_model_template.sql`, `references/sql_style.md`, `scripts/validate_sql.py` | Stored SQL model per source table. |
@@ -27,7 +27,7 @@ compose into larger pipelines.
 | **13. Review DAX Measures**<br>`workflows/review_dax_measures.md` | Structured review of a DAX measure implementation: correctness, performance hints, readability. | A measure is submitted; before merging to the semantic model. | `scripts/validate_dax.py --strict`, `references/dax_patterns.md`, `evals/dax_measure_review/` | Measure scorecard, anti-pattern list, refactor suggestions, approval. |
 | **14. Review TMDL Model**<br>`workflows/review_tmdl_model.md` | Structural review of a TMDL semantic model: attributes, relationships, naming, formats. | TMDL is submitted for merge or deployment. | `scripts/validate_tmdl.py --strict`, `references/tmdl_relationship_patterns.md` | Structural review report, relationship integrity check, naming/format issues. |
 | **15. Impact Analysis (Change)**<br>`workflows/impact_analysis.md` | Before changing a model, identify downstream artifacts affected. | PR proposes changes to a SQL model, TMDL column, or DAX measure. | `evals/impact_analysis/` | Downstream dependency list, affected reports, suggested owners to tag on PR. |
-| **16. Backfill / Re-run**<br>`workflows/backfill.md` | Safely re-process a historical range for an incremental model. | A bug was fixed and historical outputs are wrong; or a new column is added and must be populated historically. | `profile_source_data.md`, `run_data_quality_checks.md` | Backfill window selection, load order, pre/post quality snapshots, runbook. |
+| **16. Backfill / Re-run**<br>`workflows/backfill.md` | Safely re-process a historical range for an incremental model. | A bug was fixed and historical outputs are wrong; or a new column is added and must be populated historically. | `workflows/data-discovery.md`, `run_data_quality_checks.md` | Backfill window selection, load order, pre/post quality snapshots, runbook. |
 | **17. New Contributor Onboarding**<br>`workflows/new_contributor_onboarding.md` | Walk a new contributor through creating their first workflow or evaluation case. | A new engineer joins the team, or an external contributor opens their first PR. | `CONTRIBUTING.md`, `docs/contribution-guide.md`, `scripts/validate_project.py` | First PR opened, validator passes, reviewer assigned. |
 
 ## Composing Workflows: Example Pipelines
@@ -39,10 +39,10 @@ worth knowing about so that references can be shared.
 ### Pipeline A: Onboard a New Source
 
 ```
-onboard_source_system.md
- ├─ profile_source_data.md        ──► quality_check.py + profile report
+workflows/data-discovery.md
+ ├─ workflows/data-discovery.md        ──► quality_check.py + profile report
  ├─ design_staging_schema.md      ──► column list + types
- ├─ create_staging_sql.md         ──► SQL models
+ ├─ workflows/sql-analysis.md         ──► SQL models
  ├─ review_staging_sql.md         ──► validate_sql.py --strict
  └─ run_data_quality_checks.md    ──► quality_check.py vs thresholds
 ```
@@ -50,12 +50,12 @@ onboard_source_system.md
 ### Pipeline B: Build a Star Schema + Semantic Model
 
 ```
-star_schema_design.md
+workflows/data-modeling.md
  ├─ (for each dim) dimension_table_design.md
  │   └─ create_star_sql.md          ──► validate_sql.py --strict
  ├─ (for each fact) fact_table_design.md
  │   └─ create_star_sql.md          ──► validate_sql.py --strict
- ├─ create_tmdl_model.md            ──► validate_tmdl.py --strict
+ ├─ workflows/tmdl-analysis.md            ──► validate_tmdl.py --strict
  ├─ create_dax_measures.md          ──► validate_dax.py --strict
  ├─ review_tmdl_model.md
  ├─ review_dax_measures.md

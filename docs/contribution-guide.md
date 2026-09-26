@@ -351,7 +351,7 @@ echo $?
 
 | Thing | Convention | Example |
 |---|---|---|
-| Workflow files | `<verb-or-topic>_<descriptive>.md` | `onboard_source_system.md` |
+| Workflow files | `<verb-or-topic>_<descriptive>.md` | `workflows/data-discovery.md` |
 | Reference files | `<topic>_<detail>.md` | `dax_calculate_semantics.md` |
 | Template files | `<type>_<scope>_template.<ext>` | `sql_model_template.sql` |
 | Validator scripts | `validate_<scope>.py` or `<noun>_check.py` | `validate_dax.py`, `quality_check.py` |

@@ -112,3 +112,5 @@ data/processed/
 *.orig
 # ----- venv folder 
 .venv  
+# ----- fichier de correction sur les anciens chemins de definition 
+correction.py 
